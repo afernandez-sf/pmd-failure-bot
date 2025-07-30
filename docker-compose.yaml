@@ -1,0 +1,41 @@
+services:
+  ollama:
+    image: 'ollama/ollama:latest'
+    ports:
+      - '11434'
+
+  postgres:
+    image: 'postgres:16-alpine'
+    environment:
+      - 'POSTGRES_DB=${DB_NAME:-pmd_failure_bot}'
+      - 'POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}'
+      - 'POSTGRES_USER=${DB_USER:-postgres}'
+    ports:
+      - '${DB_PORT:-64851}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      - 'PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@admin.com}'
+      - 'PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}'
+      - 'PGADMIN_CONFIG_SERVER_MODE=False'
+    ports:
+      - '${PGADMIN_PORT:-8080}:80'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  pgadmin_data:
