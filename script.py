@@ -30,7 +30,7 @@ MAX_ATTACHMENT_SIZE = int(os.getenv('MAX_ATTACHMENT_SIZE'))
 SUPPORTED_ARCHIVE_TYPES = set(os.getenv('SUPPORTED_ARCHIVE_TYPES').split(','))
 MAX_RETRIES = int(os.getenv('MAX_RETRIES'))
 RETRY_DELAY = float(os.getenv('RETRY_DELAY'))
-API_VERSION = os.getenv('API_VERSION')
+SF_API_VERSION = os.getenv('SF_API_VERSION')
 
 
 # Database configuration
@@ -52,7 +52,7 @@ def get_db_config():
     }
 
 DB_CONFIG = get_db_config()
-TABLE_NAME = os.getenv('DB_TABLE_NAME', 'failed_steps')
+TABLE_NAME = os.getenv('DB_TABLE_NAME', 'pmd_failure_logs')
 
 def setup_database():
     """Create the database table if it doesn't exist."""
@@ -73,7 +73,9 @@ def setup_database():
             content TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             salesforce_attachment_id VARCHAR(20),
-            salesforce_record_id VARCHAR(20)
+            salesforce_record_id VARCHAR(20),
+            work_id INTEGER,
+            case_number INTEGER
         );
         """
         
@@ -146,7 +148,7 @@ def query_failed_step_attachments(sf, step_name: str) -> Optional[Dict]:
             return None
         
         query = f"""
-        SELECT Id,
+        SELECT Id, WorkId_and_Subject__c,
         (
             SELECT Id, Name, BodyLength, ContentType
             FROM Attachments
@@ -211,7 +213,7 @@ def _download_attachment_body(sf, attachment_id: str) -> bytes:
     
     # Try REST API method
     try:
-        body_url = f"/services/data/{API_VERSION}/sobjects/Attachment/{attachment_id}/Body"
+        body_url = f"/services/data/{SF_API_VERSION}/sobjects/Attachment/{attachment_id}/Body"
         response = sf.restful(body_url, method='GET')
         if isinstance(response, bytes):
             return response
@@ -222,7 +224,7 @@ def _download_attachment_body(sf, attachment_id: str) -> bytes:
     
     # Try direct HTTP request
     try:
-        url = f"https://{sf.sf_instance}/services/data/{API_VERSION}/sobjects/Attachment/{attachment_id}/Body"
+        url = f"https://{sf.sf_instance}/services/data/{SF_API_VERSION}/sobjects/Attachment/{attachment_id}/Body"
         headers = {
             'Authorization': f'Bearer {sf.session_id}',
             'Accept': 'application/octet-stream'
@@ -304,6 +306,70 @@ def find_log_files(directory: str, step_name: str) -> List[str]:
     
     return log_files
 
+def extract_error_context(lines: List[str], context_lines: int = 3) -> List[str]:
+    """Extract lines containing errors and their surrounding context without overlap."""
+    try:
+        error_patterns = [
+            r'\bERROR\b',           # ERROR (word boundary)
+            r'\[ERROR\]',          # [ERROR]
+            r'\bFATAL\b',          # FATAL (word boundary)
+            r'\bFAILED\b',         # FAILED (word boundary)
+            r'Refusing to execute', # Specific error pattern
+            r'Unable to get',      # Pattern from CREATE_IR_ORGS_TABLE_PRESTO_TGT_NA231.log
+            r'Unable to retrieve', # Pattern from CREATE_IR_ORGS_TABLE_PRESTO_TGT_NA231.log
+            r'Unable to start',    # Pattern from GRIDFORCE_APP_LOG_COPY_NA151.log
+            r'connection error',   # Pattern from SSH_TO_ALL_HOSTS_CS310.log
+            r'maximum retries reached', # Pattern from SSH_TO_ALL_HOSTS_CS310.log
+            r'Oracle not available', # Pattern from CREATE_IR_ORGS_TABLE_PRESTO_TGT_NA231.log
+        ]
+        
+        # Compile patterns for efficiency
+        compiled_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in error_patterns]
+        
+        # Find all error line indices
+        error_indices = set()
+        for i, line in enumerate(lines):
+            for pattern in compiled_patterns:
+                if pattern.search(line):
+                    error_indices.add(i)
+                    break
+        
+        if not error_indices:
+            print("No error patterns found in log")
+            return []
+        
+        # Create ranges for each error line with context
+        ranges = []
+        for error_idx in sorted(error_indices):
+            start = max(0, error_idx - context_lines)
+            end = min(len(lines), error_idx + context_lines + 1)
+            ranges.append((start, end))
+        
+        # Merge overlapping ranges
+        merged_ranges = []
+        for start, end in ranges:
+            if merged_ranges and start <= merged_ranges[-1][1]:
+                # Overlapping or adjacent - merge
+                merged_ranges[-1] = (merged_ranges[-1][0], max(merged_ranges[-1][1], end))
+            else:
+                merged_ranges.append((start, end))
+        
+        # Extract lines from merged ranges
+        context_lines_list = []
+        for start, end in merged_ranges:
+            # Add separator between different error contexts
+            if context_lines_list:
+                context_lines_list.append("--- ERROR CONTEXT SEPARATOR ---")
+            context_lines_list.extend(lines[start:end])
+        
+        print(f"Extracted {len(context_lines_list)} lines from {len(error_indices)} error contexts")
+        return context_lines_list
+        
+    except Exception as e:
+        print(f"Error extracting context: {e}")
+        return []
+
+
 def extract_metadata_from_log(log_file_path: str) -> Optional[Dict]:
     """Extract metadata from log file."""
     try:
@@ -322,18 +388,39 @@ def extract_metadata_from_log(log_file_path: str) -> Optional[Dict]:
         if date_match:
             metadata['report_date'] = date_match.group(1)[:10]  # YYYY-MM-DD format
         
-        # Read log content
+        # Read log content and extract error context
         with open(log_file_path, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
-        metadata['content'] = content
-            
-        # Extract header information
-        header_pattern = (r'Worker Process Group ID:\s*(\d+),\s*'
-                         r'Hostname:\s*([^,]+),\s*'
-                         r'Executor Kerberos ID:\s*([^,]+),\s*'
-                         r'Requesting Kerberos ID:\s*(.+)')
+            lines = f.readlines()
         
-        header_match = re.search(header_pattern, content)
+        # Strip newlines for processing but preserve them in output
+        lines_stripped = [line.rstrip('\n\r') for line in lines]
+        
+        # Extract only error context instead of full content
+        error_context_lines = extract_error_context(lines_stripped, context_lines=3)
+        
+        if error_context_lines:
+            # Join with newlines to create content
+            content = '\n'.join(error_context_lines)
+            metadata['content'] = content
+        else:
+            # If no errors found, store a summary message instead of empty content
+            metadata['content'] = f"No error patterns detected in log file. Total lines: {len(lines)}"
+            
+        # Extract header information from original full content for metadata
+        full_content = ''.join(lines)
+        # Handle both 3-field and 4-field patterns
+        # Pattern 1: Worker Process Group ID, Hostname, Executor Kerberos ID, Requesting Kerberos ID  
+        header_pattern_4 = (r'Worker Process Group ID:\s*(\d+),\s*'
+                           r'Hostname:\s*([^,\n]+),\s*'
+                           r'Executor Kerberos ID:\s*([^,\n]+),\s*'
+                           r'Requesting Kerberos ID:\s*([^,\n]+)')
+        
+        # Pattern 2: Worker Process Group ID, Hostname, Executor Kerberos ID (no Requesting Kerberos ID)
+        header_pattern_3 = (r'Worker Process Group ID:\s*(\d+),\s*'
+                           r'Hostname:\s*([^,\n]+),\s*'
+                           r'Executor Kerberos ID:\s*([^\n,]+)')
+        
+        header_match = re.search(header_pattern_4, full_content)
         if header_match:
             metadata.update({
                 'worker_process_group_id': header_match.group(1),
@@ -341,6 +428,14 @@ def extract_metadata_from_log(log_file_path: str) -> Optional[Dict]:
                 'executor_kerberos_id': header_match.group(3).strip(),
                 'requesting_kerberos_id': header_match.group(4).strip()
             })
+        else:
+            header_match = re.search(header_pattern_3, full_content)
+            if header_match:
+                metadata.update({
+                    'worker_process_group_id': header_match.group(1),
+                    'hostname': header_match.group(2).strip(),
+                    'executor_kerberos_id': header_match.group(3).strip()
+                })
         
         return metadata
         
@@ -353,24 +448,25 @@ def insert_log_to_database(cursor, metadata: Dict) -> bool:
     try:
         insert_sql = f"""
             INSERT INTO {TABLE_NAME} (
-                file_path, executor_kerberos_id, report_date, 
-                step_name, worker_process_group_id, hostname, 
+                executor_kerberos_id, report_date, 
+                step_name, hostname, 
                 requesting_kerberos_id, content, 
-                salesforce_attachment_id, salesforce_record_id
+                attachment_id, record_id,
+                work_id, case_number
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         values = (
-            metadata.get('file_path'),
             metadata.get('executor_kerberos_id'),
             metadata.get('report_date'),
             metadata.get('step_name'),
-            metadata.get('worker_process_group_id'),
             metadata.get('hostname'),
             metadata.get('requesting_kerberos_id'),
             metadata.get('content'),
             metadata.get('salesforce_attachment_id'),
-            metadata.get('salesforce_record_id')
+            metadata.get('salesforce_record_id'),
+            metadata.get('work_id'),
+            metadata.get('case_number')
         )
         
         cursor.execute(insert_sql, values)
@@ -384,7 +480,7 @@ def check_attachment_processed(cursor, attachment_id: str) -> bool:
     """Check if attachment has already been processed."""
     try:
         cursor.execute(
-            f'SELECT COUNT(*) FROM {TABLE_NAME} WHERE salesforce_attachment_id = %s',
+            f'SELECT COUNT(*) FROM {TABLE_NAME} WHERE attachment_id = %s',
             (attachment_id,)
         )
         count = cursor.fetchone()[0]
@@ -430,11 +526,21 @@ def process_attachment(sf, attachment_info: Dict, temp_directory: str) -> Tuple[
                         failed_logs += 1
                         continue
                     
-                    # Add Salesforce context
-                    metadata.update({
+                    # Add Salesforce context and metadata
+                    sf_metadata = attachment_info.get('sf_metadata', {})
+                    
+                    # Merge Salesforce metadata, with log metadata taking precedence
+                    merged_metadata = {
                         'salesforce_record_id': attachment_info['record_id'],
-                        'salesforce_attachment_id': attachment_id
-                    })
+                        'salesforce_attachment_id': attachment_id,
+                        'work_id': sf_metadata.get('work_id'),
+                        'case_number': sf_metadata.get('case_number')
+                    }
+                    
+                    # Other fields come from log metadata only (Salesforce fields not available)
+                    pass
+                    
+                    metadata.update(merged_metadata)
                     
                     if insert_log_to_database(cursor, metadata):
                         successful_logs += 1
@@ -479,12 +585,35 @@ def main():
             if result and result['totalSize'] > 0:
                 for record in result['records']:
                     if 'Attachments' in record and record['Attachments']:
+                        # Extract work_id and case_number from WorkId_and_Subject__c
+                        subject = record.get('WorkId_and_Subject__c', '')
+                        work_id = None
+                        case_number = None
+                        
+                        # Parse work_id and case_number from Subject format
+                        # Example: "W-14126296: Step: SSH_TO_ALL_HOSTS_CS310, Status: FAILED, Case: 53874260"
+                        if subject:
+                            work_match = re.search(r'W-(\d+)', subject)
+                            case_match = re.search(r'Case[:\s]*(\d+)', subject, re.IGNORECASE)
+                            
+                            if work_match:
+                                work_id = int(work_match.group(1))
+                            if case_match:
+                                case_number = int(case_match.group(1))
+                        
+                        # Extract metadata from Salesforce record
+                        sf_metadata = {
+                            'work_id': work_id,
+                            'case_number': case_number
+                        }
+                        
                         for attachment in record['Attachments']['records']:
                             attachments.append({
                                 'step': step_name,
                                 'record_id': record['Id'],
                                 'attachment_id': attachment['Id'],
-                                'attachment_name': attachment['Name']
+                                'attachment_name': attachment['Name'],
+                                'sf_metadata': sf_metadata
                             })
         
         if not attachments:

@@ -13,22 +13,24 @@ import java.util.List;
 public interface PmdReportRepository extends JpaRepository<PmdReport, Long> {
     
     @Query("SELECT p FROM PmdReport p WHERE " +
-           "(:filePath IS NULL OR p.filePath = :filePath) AND " +
-           "(:executorKerberosId IS NULL OR p.executorKerberosId = :executorKerberosId) AND " +
-           "p.reportDate = :reportDate AND " +
-           "(:reportId IS NULL OR p.reportId = :reportId) AND " +
-           "p.stepName = :stepName AND " +
-           "(:workerProcessGroupId IS NULL OR p.workerProcessGroupId = :workerProcessGroupId) AND " +
+           "(:recordId IS NULL OR p.recordId = :recordId) AND " +
+           "(:workId IS NULL OR p.workId = :workId) AND " +
+           "(:caseNumber IS NULL OR p.caseNumber = :caseNumber) AND " +
+           "(:stepName IS NULL OR p.stepName = :stepName) AND " +
+           "(:attachmentId IS NULL OR p.attachmentId = :attachmentId) AND " +
            "(:hostname IS NULL OR p.hostname = :hostname) AND " +
-           "(:requestingKerberosId IS NULL OR p.requestingKerberosId = :requestingKerberosId)")
+           "(:executorKerberosId IS NULL OR p.executorKerberosId = :executorKerberosId) AND " +
+           "(:requestingKerberosId IS NULL OR p.requestingKerberosId = :requestingKerberosId) AND " +
+           "(:reportDate IS NULL OR p.reportDate = :reportDate)")
     List<PmdReport> findByFilters(
-            @Param("filePath") String filePath,
-            @Param("executorKerberosId") String executorKerberosId,
-            @Param("reportDate") LocalDate reportDate,
-            @Param("reportId") String reportId,
+            @Param("recordId") String recordId,
+            @Param("workId") Integer workId,
+            @Param("caseNumber") Integer caseNumber,
             @Param("stepName") String stepName,
-            @Param("workerProcessGroupId") String workerProcessGroupId,
+            @Param("attachmentId") String attachmentId,
             @Param("hostname") String hostname,
-            @Param("requestingKerberosId") String requestingKerberosId
+            @Param("executorKerberosId") String executorKerberosId,
+            @Param("requestingKerberosId") String requestingKerberosId,
+            @Param("reportDate") LocalDate reportDate
     );
 } 

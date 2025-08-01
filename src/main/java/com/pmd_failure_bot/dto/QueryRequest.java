@@ -5,61 +5,56 @@ import java.time.LocalDate;
 
 public class QueryRequest {
     
-    @JsonProperty("file_path")
-    private String filePath;
+    @JsonProperty("record_id")
+    private String recordId;
     
-    @JsonProperty("executor_kerberos_id")
-    private String executorKerberosId;
+    @JsonProperty("work_id")
+    private Integer workId;
     
-    @JsonProperty("report_date")
-    private LocalDate reportDate;
-    
-    @JsonProperty("report_id")
-    private String reportId;
+    @JsonProperty("case_number")
+    private Integer caseNumber;
     
     @JsonProperty("step_name")
     private String stepName;
     
-    @JsonProperty("worker_process_group_id")
-    private String workerProcessGroupId;
+    @JsonProperty("attachment_id")
+    private String attachmentId;
     
     private String hostname;
+    
+    @JsonProperty("executor_kerberos_id")
+    private String executorKerberosId;
     
     @JsonProperty("requesting_kerberos_id")
     private String requestingKerberosId;
     
+    @JsonProperty("report_date")
+    private LocalDate reportDate;
+    
     private String query;
 
-    public String getFilePath() {
-        return filePath;
+    public String getRecordId() {
+        return recordId;
     }
 
-    public void setFilePath(String filePath) {
-        this.filePath = filePath;
+    public void setRecordId(String recordId) {
+        this.recordId = recordId;
     }
 
-    public String getExecutorKerberosId() {
-        return executorKerberosId;
+    public Integer getWorkId() {
+        return workId;
     }
 
-    public void setExecutorKerberosId(String executorKerberosId) {
-        this.executorKerberosId = executorKerberosId;
+    public void setWorkId(Integer workId) {
+        this.workId = workId;
     }
 
-    public LocalDate getReportDate() {
-        return reportDate;
+    public Integer getCaseNumber() {
+        return caseNumber;
     }
 
-    public void setReportDate(LocalDate reportDate) {
-        this.reportDate = reportDate;
-    }
-
-    public String getReportId() {
-        return reportId;
-    }
-
-    public void setReportId(String reportId) {
-        this.reportId = reportId;
+    public void setCaseNumber(Integer caseNumber) {
+        this.caseNumber = caseNumber;
     }
 
     public String getStepName() {
@@ -70,12 +65,12 @@ public class QueryRequest {
         this.stepName = stepName;
     }
 
-    public String getWorkerProcessGroupId() {
-        return workerProcessGroupId;
+    public String getAttachmentId() {
+        return attachmentId;
     }
 
-    public void setWorkerProcessGroupId(String workerProcessGroupId) {
-        this.workerProcessGroupId = workerProcessGroupId;
+    public void setAttachmentId(String attachmentId) {
+        this.attachmentId = attachmentId;
     }
 
     public String getHostname() {
@@ -86,12 +81,28 @@ public class QueryRequest {
         this.hostname = hostname;
     }
 
+    public String getExecutorKerberosId() {
+        return executorKerberosId;
+    }
+
+    public void setExecutorKerberosId(String executorKerberosId) {
+        this.executorKerberosId = executorKerberosId;
+    }
+
     public String getRequestingKerberosId() {
         return requestingKerberosId;
     }
 
     public void setRequestingKerberosId(String requestingKerberosId) {
         this.requestingKerberosId = requestingKerberosId;
+    }
+
+    public LocalDate getReportDate() {
+        return reportDate;
+    }
+
+    public void setReportDate(LocalDate reportDate) {
+        this.reportDate = reportDate;
     }
 
     public String getQuery() {

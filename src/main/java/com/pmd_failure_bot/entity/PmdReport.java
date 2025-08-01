@@ -2,36 +2,35 @@ package com.pmd_failure_bot.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "pmd_reports")
+@Table(name = "pmd_failure_logs")
 public class PmdReport {
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @Column(name = "file_path")
-    private String filePath;
+    @Column(name = "record_id")
+    private String recordId;
     
-    @Column(name = "executor_kerberos_id")
-    private String executorKerberosId;
+    @Column(name = "work_id")
+    private Integer workId;
     
-    @Column(name = "report_date", nullable = false)
-    private LocalDate reportDate;
+    @Column(name = "case_number")
+    private Integer caseNumber;
     
-    @Column(name = "report_id")
-    private String reportId;
-    
-    @Column(name = "step_name", nullable = false)
+    @Column(name = "step_name")
     private String stepName;
     
-    @Column(name = "worker_process_group_id")
-    private String workerProcessGroupId;
+    @Column(name = "attachment_id")
+    private String attachmentId;
     
     @Column(name = "hostname")
     private String hostname;
+    
+    @Column(name = "executor_kerberos_id")
+    private String executorKerberosId;
     
     @Column(name = "requesting_kerberos_id")
     private String requestingKerberosId;
@@ -39,13 +38,10 @@ public class PmdReport {
     @Column(name = "content", columnDefinition = "TEXT")
     private String content;
     
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
+    @Column(name = "report_date")
+    private LocalDate reportDate;
     
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-    }
+
 
     public Long getId() {
         return id;
@@ -55,36 +51,28 @@ public class PmdReport {
         this.id = id;
     }
 
-    public String getFilePath() {
-        return filePath;
+    public String getRecordId() {
+        return recordId;
     }
 
-    public void setFilePath(String filePath) {
-        this.filePath = filePath;
+    public void setRecordId(String recordId) {
+        this.recordId = recordId;
     }
 
-    public String getExecutorKerberosId() {
-        return executorKerberosId;
+    public Integer getWorkId() {
+        return workId;
     }
 
-    public void setExecutorKerberosId(String executorKerberosId) {
-        this.executorKerberosId = executorKerberosId;
+    public void setWorkId(Integer workId) {
+        this.workId = workId;
     }
 
-    public LocalDate getReportDate() {
-        return reportDate;
+    public Integer getCaseNumber() {
+        return caseNumber;
     }
 
-    public void setReportDate(LocalDate reportDate) {
-        this.reportDate = reportDate;
-    }
-
-    public String getReportId() {
-        return reportId;
-    }
-
-    public void setReportId(String reportId) {
-        this.reportId = reportId;
+    public void setCaseNumber(Integer caseNumber) {
+        this.caseNumber = caseNumber;
     }
 
     public String getStepName() {
@@ -95,12 +83,12 @@ public class PmdReport {
         this.stepName = stepName;
     }
 
-    public String getWorkerProcessGroupId() {
-        return workerProcessGroupId;
+    public String getAttachmentId() {
+        return attachmentId;
     }
 
-    public void setWorkerProcessGroupId(String workerProcessGroupId) {
-        this.workerProcessGroupId = workerProcessGroupId;
+    public void setAttachmentId(String attachmentId) {
+        this.attachmentId = attachmentId;
     }
 
     public String getHostname() {
@@ -109,6 +97,14 @@ public class PmdReport {
 
     public void setHostname(String hostname) {
         this.hostname = hostname;
+    }
+
+    public String getExecutorKerberosId() {
+        return executorKerberosId;
+    }
+
+    public void setExecutorKerberosId(String executorKerberosId) {
+        this.executorKerberosId = executorKerberosId;
     }
 
     public String getRequestingKerberosId() {
@@ -127,11 +123,11 @@ public class PmdReport {
         this.content = content;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
+    public LocalDate getReportDate() {
+        return reportDate;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
+    public void setReportDate(LocalDate reportDate) {
+        this.reportDate = reportDate;
     }
 } 

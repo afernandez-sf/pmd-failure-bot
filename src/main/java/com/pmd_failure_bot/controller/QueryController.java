@@ -44,4 +44,4 @@ public class QueryController {
             return ResponseEntity.internalServerError().body(errorResponse);
         }
     }
-} 
+}
