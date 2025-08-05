@@ -36,7 +36,7 @@ public class QueryService {
         
         // Ensure at least one filter field is provided to limit the search scope
         if (isAllFiltersEmpty(request)) {
-            throw new IllegalArgumentException("At least one filter field must be provided (step_name, work_id, case_number, record_id, attachment_id, hostname, executor_kerberos_id, requesting_kerberos_id, or report_date)");
+            throw new IllegalArgumentException("At least one filter field must be provided (step_name, work_id, case_number, record_id, attachment_id, hostname, or report_date)");
         }
 
         List<PmdReport> reports = pmdReportRepository.findByFilters(
@@ -46,8 +46,6 @@ public class QueryService {
                 request.getStepName(),
                 request.getAttachmentId(),
                 request.getHostname(),
-                request.getExecutorKerberosId(),
-                request.getRequestingKerberosId(),
                 request.getReportDate()
         );
 
@@ -123,8 +121,6 @@ public class QueryService {
             context.append(String.format("Attachment ID: %s\n", report.getAttachmentId() != null ? report.getAttachmentId() : "N/A"));
             context.append(String.format("Report Date: %s\n", report.getReportDate() != null ? report.getReportDate() : "N/A"));
             context.append(String.format("Hostname: %s\n", report.getHostname() != null ? report.getHostname() : "N/A"));
-            context.append(String.format("Executor Kerberos ID: %s\n", report.getExecutorKerberosId() != null ? report.getExecutorKerberosId() : "N/A"));
-            context.append(String.format("Requesting Kerberos ID: %s\n", report.getRequestingKerberosId() != null ? report.getRequestingKerberosId() : "N/A"));
             context.append("\n--- LOG CONTENT ---\n");
             context.append(report.getContent() != null ? report.getContent() : "No content available");
             context.append("\n\n");
@@ -135,13 +131,11 @@ public class QueryService {
     
     private boolean isAllFiltersEmpty(QueryRequest request) {
         return (request.getRecordId() == null || request.getRecordId().trim().isEmpty()) &&
-               request.getWorkId() == null &&
+               (request.getWorkId() == null || request.getWorkId().trim().isEmpty()) &&
                request.getCaseNumber() == null &&
                (request.getStepName() == null || request.getStepName().trim().isEmpty()) &&
                (request.getAttachmentId() == null || request.getAttachmentId().trim().isEmpty()) &&
                (request.getHostname() == null || request.getHostname().trim().isEmpty()) &&
-               (request.getExecutorKerberosId() == null || request.getExecutorKerberosId().trim().isEmpty()) &&
-               (request.getRequestingKerberosId() == null || request.getRequestingKerberosId().trim().isEmpty()) &&
                request.getReportDate() == null;
     }
 } 

@@ -15,7 +15,7 @@ public class PmdReport {
     private String recordId;
     
     @Column(name = "work_id")
-    private Integer workId;
+    private String workId;
     
     @Column(name = "case_number")
     private Integer caseNumber;
@@ -29,11 +29,7 @@ public class PmdReport {
     @Column(name = "hostname")
     private String hostname;
     
-    @Column(name = "executor_kerberos_id")
-    private String executorKerberosId;
-    
-    @Column(name = "requesting_kerberos_id")
-    private String requestingKerberosId;
+
     
     @Column(name = "content", columnDefinition = "TEXT")
     private String content;
@@ -59,11 +55,11 @@ public class PmdReport {
         this.recordId = recordId;
     }
 
-    public Integer getWorkId() {
+    public String getWorkId() {
         return workId;
     }
 
-    public void setWorkId(Integer workId) {
+    public void setWorkId(String workId) {
         this.workId = workId;
     }
 
@@ -99,21 +95,7 @@ public class PmdReport {
         this.hostname = hostname;
     }
 
-    public String getExecutorKerberosId() {
-        return executorKerberosId;
-    }
 
-    public void setExecutorKerberosId(String executorKerberosId) {
-        this.executorKerberosId = executorKerberosId;
-    }
-
-    public String getRequestingKerberosId() {
-        return requestingKerberosId;
-    }
-
-    public void setRequestingKerberosId(String requestingKerberosId) {
-        this.requestingKerberosId = requestingKerberosId;
-    }
 
     public String getContent() {
         return content;

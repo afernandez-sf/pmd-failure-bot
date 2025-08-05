@@ -1,6 +1,7 @@
 package com.pmd_failure_bot.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDate;
 
 public class QueryRequest {
@@ -9,7 +10,7 @@ public class QueryRequest {
     private String recordId;
     
     @JsonProperty("work_id")
-    private Integer workId;
+    private String workId;
     
     @JsonProperty("case_number")
     private Integer caseNumber;
@@ -22,13 +23,10 @@ public class QueryRequest {
     
     private String hostname;
     
-    @JsonProperty("executor_kerberos_id")
-    private String executorKerberosId;
-    
-    @JsonProperty("requesting_kerberos_id")
-    private String requestingKerberosId;
+
     
     @JsonProperty("report_date")
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate reportDate;
     
     private String query;
@@ -41,11 +39,11 @@ public class QueryRequest {
         this.recordId = recordId;
     }
 
-    public Integer getWorkId() {
+    public String getWorkId() {
         return workId;
     }
 
-    public void setWorkId(Integer workId) {
+    public void setWorkId(String workId) {
         this.workId = workId;
     }
 
@@ -81,21 +79,7 @@ public class QueryRequest {
         this.hostname = hostname;
     }
 
-    public String getExecutorKerberosId() {
-        return executorKerberosId;
-    }
 
-    public void setExecutorKerberosId(String executorKerberosId) {
-        this.executorKerberosId = executorKerberosId;
-    }
-
-    public String getRequestingKerberosId() {
-        return requestingKerberosId;
-    }
-
-    public void setRequestingKerberosId(String requestingKerberosId) {
-        this.requestingKerberosId = requestingKerberosId;
-    }
 
     public LocalDate getReportDate() {
         return reportDate;
