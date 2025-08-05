@@ -4,9 +4,6 @@ import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.dto.QueryResponse;
 import com.pmd_failure_bot.entity.PmdReport;
 import com.pmd_failure_bot.repository.PmdReportRepository;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -19,12 +16,12 @@ import java.util.stream.Collectors;
 public class QueryService {
 
     private final PmdReportRepository pmdReportRepository;
-    private final ChatClient chatClient;
+    private final SalesforceLlmGatewayService llmGatewayService;
 
     @Autowired
-    public QueryService(PmdReportRepository pmdReportRepository, ChatClient.Builder chatClientBuilder) {
+    public QueryService(PmdReportRepository pmdReportRepository, SalesforceLlmGatewayService llmGatewayService) {
         this.pmdReportRepository = pmdReportRepository;
-        this.chatClient = chatClientBuilder.build();
+        this.llmGatewayService = llmGatewayService;
     }
 
     public QueryResponse processQuery(QueryRequest request) {
@@ -90,13 +87,17 @@ public class QueryService {
                 Provide your detailed analysis below:
                 """;
 
-        PromptTemplate template = new PromptTemplate(promptTemplate);
-        Prompt prompt = template.create(Map.of(
-                "context", llmContext,
-                "query", request.getQuery()
-        ));
+        // Replace placeholders in the prompt template
+        String finalPrompt = promptTemplate
+                .replace("{context}", llmContext)
+                .replace("{query}", request.getQuery());
 
-        String llmResponse = chatClient.prompt(prompt).call().content();
+        String llmResponse;
+        try {
+            llmResponse = llmGatewayService.generateResponse(finalPrompt);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate LLM response: " + e.getMessage(), e);
+        }
         
         long executionTimeMs = System.currentTimeMillis() - startTime;
         
