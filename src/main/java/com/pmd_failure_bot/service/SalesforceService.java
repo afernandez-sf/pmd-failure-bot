@@ -98,7 +98,7 @@ public class SalesforceService {
         String query = String.format("""
             SELECT Id, WorkId_and_Subject__c,
             (
-                SELECT Id, Name, BodyLength, ContentType
+                SELECT Id, Name, BodyLength, ContentType, LastModifiedDate
                 FROM Attachments
             )
             FROM ADM_Work__c 
@@ -114,7 +114,7 @@ public class SalesforceService {
      */
     public List<Map<String, Object>> queryFailedAttachmentsByCaseNumber(Integer caseNumber) throws Exception {
         ensureLoggedIn();
-        
+
         if (caseNumber == null || caseNumber <= 0) {
             throw new IllegalArgumentException("Invalid case number: " + caseNumber);
         }
@@ -122,14 +122,13 @@ public class SalesforceService {
         String query = String.format("""
             SELECT Id, WorkId_and_Subject__c,
             (
-                SELECT Id, Name, BodyLength, ContentType
+                SELECT Id, Name, BodyLength, ContentType, LastModifiedDate
                 FROM Attachments
             )
             FROM ADM_Work__c 
-            WHERE WorkId_and_Subject__c LIKE '%%Case: %d%%' 
-            AND Subject__c LIKE '%%Status: FAILED%%'
+            WHERE WorkId_and_Subject__c LIKE '%%Status: FAILED%%Case: %d%%'
             """, caseNumber);
-        
+
         logger.info("Querying failed attachments for case: {}", caseNumber);
         return executeQuery(query);
     }
@@ -244,19 +243,30 @@ public class SalesforceService {
         
         String subject = (String) record.get("WorkId_and_Subject__c");
         if (subject != null) {
-            // Parse work_id and case_number from Subject format
-            // Example: "W-14126296: Step: SSH_TO_ALL_HOSTS_CS310, Status: FAILED, Case: 53874260"
+            // Parse work_id, case_number, step_name, and hostname from Subject format
+            // Example: "W-15540393: Step: SSH_TO_ALL_HOSTS_EU49_DR, Status: FAILED, Case: 58989945 - [PMD/IR@2024-Apr-20 PST]: Maintenance tasks for target EU49 EU51 NA241, Host: ops0-release1-2-am3 -- Caffeine task log attached"
             Pattern workPattern = Pattern.compile("(W-\\d+)");
             Pattern casePattern = Pattern.compile("Case[:\\s]*(\\d+)");
+            Pattern stepPattern = Pattern.compile("Step[:\\s]+([^,\\s]+)");
+            Pattern hostPattern = Pattern.compile("Host[:\\s]+([^\\s-]+-[^\\s-]+-[^\\s-]+-([^\\s-]+))");
             
             Matcher workMatcher = workPattern.matcher(subject);
             Matcher caseMatcher = casePattern.matcher(subject);
+            Matcher stepMatcher = stepPattern.matcher(subject);
+            Matcher hostMatcher = hostPattern.matcher(subject);
             
             if (workMatcher.find()) {
                 metadata.put("work_id", workMatcher.group(1)); // Store full W-XXXXXX format
             }
             if (caseMatcher.find()) {
                 metadata.put("case_number", Integer.parseInt(caseMatcher.group(1)));
+            }
+            if (stepMatcher.find()) {
+                metadata.put("step_name", stepMatcher.group(1)); // Store step name exactly as shown
+            }
+            if (hostMatcher.find()) {
+                String hostnameSuffix = hostMatcher.group(2); // Extract just the suffix (e.g., "am3")
+                metadata.put("hostname", hostnameSuffix);
             }
         }
         

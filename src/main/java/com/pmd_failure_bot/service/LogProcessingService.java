@@ -269,10 +269,11 @@ public class LogProcessingService {
         // Read log content
         List<String> lines = Files.readAllLines(logFile);
         
-        // Extract error context
+        // Extract error context or use full log content
         String errorContext = extractErrorContext(lines);
         if (errorContext.isEmpty()) {
-            errorContext = String.format("No error patterns detected in log file. Total lines: %d", lines.size());
+            // If no error patterns detected, store the entire log content
+            errorContext = String.join("\n", lines);
         }
         
         // Set basic fields
@@ -280,20 +281,41 @@ public class LogProcessingService {
         report.setAttachmentId(attachmentId);
         report.setRecordId(recordId);
         
-        // Extract clean step name from filename
-        String fileName = logFile.getFileName().toString().replaceAll("\\.log$", "");
-        report.setStepName(extractCleanStepName(fileName));
-        
-        // Extract metadata from log content
-        String fullContent = String.join("\n", lines);
-        extractLogMetadata(report, fullContent);
-        
         // Set Salesforce metadata
         if (salesforceMetadata.containsKey("work_id")) {
             report.setWorkId((String) salesforceMetadata.get("work_id"));
         }
         if (salesforceMetadata.containsKey("case_number")) {
             report.setCaseNumber((Integer) salesforceMetadata.get("case_number"));
+        }
+        if (salesforceMetadata.containsKey("step_name")) {
+            report.setStepName((String) salesforceMetadata.get("step_name"));
+        } else {
+            // Fallback: extract step name from filename if not available in Salesforce metadata
+            String fileName = logFile.getFileName().toString().replaceAll("\\.log$", "");
+            report.setStepName(fileName);
+        }
+        if (salesforceMetadata.containsKey("hostname")) {
+            report.setHostname((String) salesforceMetadata.get("hostname"));
+        } else {
+            // Fallback: extract hostname from log content if not available in Salesforce metadata
+            String fullContent = String.join("\n", lines);
+            extractHostnameFromLogContent(report, fullContent);
+        }
+        
+        // Set report date from attachment LastModifiedDate
+        if (salesforceMetadata.containsKey("attachment_last_modified_date")) {
+            String lastModifiedDateStr = (String) salesforceMetadata.get("attachment_last_modified_date");
+            if (lastModifiedDateStr != null) {
+                try {
+                    // Parse Salesforce datetime format (ISO format) and extract date part
+                    // Example: "2024-09-17T14:09:21.000+0000"
+                    LocalDate reportDate = LocalDate.parse(lastModifiedDateStr.substring(0, 10), DateTimeFormatter.ISO_LOCAL_DATE);
+                    report.setReportDate(reportDate);
+                } catch (Exception e) {
+                    logger.warn("Failed to parse LastModifiedDate: {}", lastModifiedDateStr, e);
+                }
+            }
         }
         
         return report;
@@ -355,44 +377,17 @@ public class LogProcessingService {
         return context.toString();
     }
     
-    private void extractLogMetadata(PmdReport report, String logContent) {
-        // Extract hostname from log content
+    private void extractHostnameFromLogContent(PmdReport report, String logContent) {
+        // Extract hostname from log content as fallback
         Pattern hostnamePattern = Pattern.compile("Hostname:\\s*([^,\\n]+)");
         Matcher hostnameMatcher = hostnamePattern.matcher(logContent);
         if (hostnameMatcher.find()) {
             String fullHostname = hostnameMatcher.group(1).trim();
             report.setHostname(extractHostnameSuffix(fullHostname));
         }
-        
-        // Extract report date from content
-        Pattern datePattern = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})");
-        Matcher dateMatcher = datePattern.matcher(logContent);
-        if (dateMatcher.find()) {
-            try {
-                LocalDate reportDate = LocalDate.parse(dateMatcher.group(1), DateTimeFormatter.ISO_LOCAL_DATE);
-                report.setReportDate(reportDate);
-            } catch (Exception e) {
-                logger.warn("Failed to parse date: {}", dateMatcher.group(1));
-            }
-        }
     }
     
-    /**
-     * Extract clean step name by removing suffixes like _CS273_DR
-     * Examples:
-     * - SSH_TO_ALL_HOSTS_CS273_DR -> SSH_TO_ALL_HOSTS
-     * - GRIDFORCE_APP_LOG_COPY_NA151 -> GRIDFORCE_APP_LOG_COPY
-     */
-    private String extractCleanStepName(String stepName) {
-        if (stepName == null) {
-            return null;
-        }
-        
-        // Remove common suffixes: _CS###, _NA###, _DR, etc.
-        // Pattern matches underscore followed by CS/NA/DR and optional numbers/letters
-        Pattern suffixPattern = Pattern.compile("_(CS|NA|DR)\\d*(_\\w*)?$");
-        return suffixPattern.matcher(stepName).replaceAll("");
-    }
+
     
     /**
      * Extract hostname suffix (last part after hyphen)

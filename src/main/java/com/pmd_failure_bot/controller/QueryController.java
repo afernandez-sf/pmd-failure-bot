@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -105,12 +106,16 @@ public class QueryController {
                             String stepName = request.getStepName() != null ? 
                                 request.getStepName() : extractStepNameFromSubject(record);
                             
+                            // Combine Salesforce record metadata with attachment-specific metadata
+                            Map<String, Object> combinedMetadata = new HashMap<>(salesforceMetadata);
+                            combinedMetadata.put("attachment_last_modified_date", attachment.get("LastModifiedDate"));
+                            
                             attachments.add(new AttachmentInfo(
                                 (String) attachment.get("Id"),
                                 (String) attachment.get("Name"),
                                 (String) record.get("Id"),
                                 stepName,
-                                salesforceMetadata
+                                combinedMetadata
                             ));
                         }
                     }
