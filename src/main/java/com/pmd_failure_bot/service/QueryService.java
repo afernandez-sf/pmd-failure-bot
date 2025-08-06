@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 
 
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -50,13 +49,13 @@ public class QueryService {
         
         List<QueryResponse.ReportInfo> reportPaths = reports.stream()
                 .map(report -> new QueryResponse.ReportInfo(
-                        report.getAttachmentId() != null ? report.getAttachmentId() : "N/A"
+                        report.getRecordId() != null ? report.getRecordId() : "N/A"
                 ))
                 .collect(Collectors.toList());
 
         String promptTemplate = """
                 <instructions>
-                Read the following log content inside <context></context> XML tags, and then answer the question inside <question></question> XML tags based on the context. Respond "Unsure about answer" if not sure about the answer.
+                Read the following log content inside <context></context> XML tags, and then answer the question inside <question></question> XML tags based on the context. Be specific and provide details. Provide your answer in plain text, without any formatting. Respond "Unsure about answer." if not sure about the answer.
                 </instructions>
                 
                 <context>

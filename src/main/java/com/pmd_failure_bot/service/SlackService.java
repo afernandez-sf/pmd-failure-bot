@@ -256,22 +256,16 @@ public class SlackService {
     private String formatSlackResponse(QueryResponse response, String originalQuery) {
         StringBuilder sb = new StringBuilder();
         
-        sb.append("🤖 **PMD Analysis Results**\n\n");
-        sb.append("📝 **Query**: ").append(originalQuery).append("\n");
-        sb.append("⏱️ **Execution Time**: ").append(response.getExecutionTimeMs()).append("ms\n");
-        sb.append("📊 **Reports Analyzed**: ").append(response.getReports().size()).append("\n");
-        sb.append("🕐 **Analyzed At**: ").append(response.getExecutedAt()).append("\n\n");
-        
-        sb.append("📋 **Analysis**:\n");
-        
         // Extract the actual text response from the LLM JSON
         String analysisText = extractTextFromLlmResponse(response.getLlmResponse());
         sb.append(analysisText);
         
         if (!response.getReports().isEmpty()) {
-            sb.append("\n\n📁 **Report Files**:\n");
+            sb.append("\n\n*Related Work Items:*\n");
             for (QueryResponse.ReportInfo reportInfo : response.getReports()) {
-                sb.append("• ").append(reportInfo.getPath()).append("\n");
+                // Convert Salesforce record ID to GUS work item URL
+                String gusUrl = "https://gus.lightning.force.com/lightning/r/ADM_Work__c/" + reportInfo.getPath() + "/view";
+                sb.append("• ").append(gusUrl).append("\n");
             }
         }
         
