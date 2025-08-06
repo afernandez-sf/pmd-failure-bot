@@ -1,5 +1,7 @@
 package com.pmd_failure_bot.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.dto.QueryResponse;
 import com.slack.api.bolt.App;
@@ -29,6 +31,9 @@ public class SlackService {
     private static final Logger logger = LoggerFactory.getLogger(SlackService.class);
     private final QueryService queryService;
     private final App slackApp;
+    
+    // Simple cache to prevent duplicate processing of the same message
+    private final java.util.Set<String> processedMessages = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     @Value("${slack.bot.channel:pmd-slack-bot}")
     private String botChannelName;
@@ -65,6 +70,14 @@ public class SlackService {
             String text = event.getText();
             String userId = event.getUser();
             String channel = event.getChannel();
+            String eventKey = channel + ":" + event.getTs() + ":" + text.hashCode();
+            
+            // Prevent duplicate processing
+            if (processedMessages.contains(eventKey)) {
+                logger.debug("Skipping duplicate message: {}", eventKey);
+                return;
+            }
+            processedMessages.add(eventKey);
             
             logger.info("Received mention from user {} in channel {}: {}", userId, channel, text);
             
@@ -72,17 +85,18 @@ public class SlackService {
             String cleanedText = text.replaceAll("<@[A-Z0-9]+>", "").trim();
             
             if (cleanedText.isEmpty()) {
-                sendHelpMessage(channel, ctx);
+                sendHelpMessage(channel, ctx, event.getTs());
                 return;
             }
             
-            processQueryAndRespond(cleanedText, channel, ctx, userId);
+            processQueryAndRespond(cleanedText, channel, ctx, userId, event.getTs());
             
         } catch (Exception e) {
             logger.error("Error handling app mention: ", e);
             try {
                 ctx.client().chatPostMessage(r -> r
                     .channel(event.getChannel())
+                    .threadTs(event.getTs())
                     .text("❌ Sorry, I encountered an error processing your request. Please try again later.")
                 );
             } catch (Exception ex) {
@@ -110,11 +124,11 @@ public class SlackService {
             logger.info("Received DM from user {}: {}", userId, text);
             
             if (text == null || text.trim().isEmpty()) {
-                sendHelpMessage(channel, ctx);
+                sendHelpMessage(channel, ctx, null); // No thread for DMs
                 return;
             }
             
-            processQueryAndRespond(text.trim(), channel, ctx, userId);
+            processQueryAndRespond(text.trim(), channel, ctx, userId, null); // No thread for DMs
             
         } catch (Exception e) {
             logger.error("Error handling direct message: ", e);
@@ -138,11 +152,11 @@ public class SlackService {
             logger.info("Received slash command from user {}: {}", userId, command);
             
             if (command == null || command.trim().isEmpty()) {
-                sendHelpMessage(channelId, ctx);
+                sendHelpMessage(channelId, ctx, null); // No thread for slash commands
                 return;
             }
             
-            processQueryAndRespond(command.trim(), channelId, ctx, userId);
+            processQueryAndRespond(command.trim(), channelId, ctx, userId, null); // No thread for slash commands
             
         } catch (Exception e) {
             logger.error("Error handling slash command: ", e);
@@ -150,38 +164,53 @@ public class SlackService {
         }
     }
 
-    private void processQueryAndRespond(String queryText, String channel, Object ctx, String userId) {
+    private void processQueryAndRespond(String queryText, String channel, Object ctx, String userId, String threadTs) {
         try {
-            // Send typing indicator
-            sendTypingIndicator(channel);
+            // Add reaction to show we're processing
+            addReaction(channel, threadTs, "eyes", ctx);
             
             // Parse the query to extract parameters
             QueryRequest queryRequest = parseQueryFromText(queryText);
+            logger.info("Parsed query - Case: {}, Step: {}, Host: {}, Date: {}, Query: '{}'", 
+                       queryRequest.getCaseNumber(), queryRequest.getStepName(), 
+                       queryRequest.getHostname(), queryRequest.getReportDate(), queryRequest.getQuery());
             
             // Process the query
             QueryResponse response = queryService.processQuery(queryRequest);
             
             // Format and send the response
             String formattedResponse = formatSlackResponse(response, queryText);
-            sendMessage(channel, formattedResponse, ctx);
+            sendMessageInThread(channel, formattedResponse, ctx, threadTs);
+            
+            // Add completion reaction
+            addReaction(channel, threadTs, "white_check_mark", ctx);
             
         } catch (IllegalArgumentException e) {
             logger.warn("Invalid query from user {}: {}", userId, e.getMessage());
             String errorMsg = "❌ **Error**: " + e.getMessage() + "\n\n" + getUsageHelp();
-            sendMessage(channel, errorMsg, ctx);
+            sendMessageInThread(channel, errorMsg, ctx, threadTs);
+            addReaction(channel, threadTs, "x", ctx);
         } catch (Exception e) {
             logger.error("Error processing query from user {}: ", userId, e);
-            sendMessage(channel, "❌ Sorry, I encountered an error processing your request. Please try again later.", ctx);
+            sendMessageInThread(channel, "❌ Sorry, I encountered an error processing your request. Please try again later.", ctx, threadTs);
+            addReaction(channel, threadTs, "x", ctx);
         }
     }
 
     private QueryRequest parseQueryFromText(String text) {
         QueryRequest request = new QueryRequest();
         
-        // Default values
-        request.setStepName("default"); // Set a default step name
+        // No default values - let them be null so they don't filter the query
         
         // Extract parameters using patterns
+        // Pattern for case number: case_number:123456 or case_number=123456
+        Pattern casePattern = Pattern.compile("(?:case_number[:=])(\\d+)", Pattern.CASE_INSENSITIVE);
+        Matcher caseMatcher = casePattern.matcher(text);
+        if (caseMatcher.find()) {
+            request.setCaseNumber(Integer.parseInt(caseMatcher.group(1)));
+            text = text.replaceAll(casePattern.pattern(), "").trim();
+        }
+        
         // Pattern for step name: step:stepname or step=stepname
         Pattern stepPattern = Pattern.compile("(?:step[:=])([\\w-]+)", Pattern.CASE_INSENSITIVE);
         Matcher stepMatcher = stepPattern.matcher(text);
@@ -231,7 +260,10 @@ public class SlackService {
         sb.append("🕐 **Analyzed At**: ").append(response.getExecutedAt()).append("\n\n");
         
         sb.append("📋 **Analysis**:\n");
-        sb.append(response.getLlmResponse());
+        
+        // Extract the actual text response from the LLM JSON
+        String analysisText = extractTextFromLlmResponse(response.getLlmResponse());
+        sb.append(analysisText);
         
         if (!response.getReports().isEmpty()) {
             sb.append("\n\n📁 **Report Files**:\n");
@@ -243,9 +275,9 @@ public class SlackService {
         return sb.toString();
     }
 
-    private void sendHelpMessage(String channel, Object ctx) {
+    private void sendHelpMessage(String channel, Object ctx, String threadTs) {
         String helpMessage = "👋 **PMD Failure Bot Help**\n\n" + getUsageHelp();
-        sendMessage(channel, helpMessage, ctx);
+        sendMessageInThread(channel, helpMessage, ctx, threadTs);
     }
 
     private String getUsageHelp() {
@@ -273,16 +305,7 @@ public class SlackService {
                 """;
     }
 
-    private void sendTypingIndicator(String channel) {
-        try {
-            slackApp.client().chatPostMessage(r -> r
-                .channel(channel)
-                .text("🔍 Analyzing PMD reports...")
-            );
-        } catch (Exception e) {
-            logger.debug("Failed to send typing indicator: ", e);
-        }
-    }
+
 
     private void sendMessage(String channel, String message, Object ctx) {
         try {
@@ -305,6 +328,93 @@ public class SlackService {
             }
         } catch (Exception e) {
             logger.error("Failed to send message to channel {}: ", channel, e);
+        }
+    }
+    
+    private void sendMessageInThread(String channel, String message, Object ctx, String threadTs) {
+        try {
+            if (ctx instanceof EventContext) {
+                var builder = ((EventContext) ctx).client().chatPostMessage(r -> {
+                    var req = r.channel(channel).text(message);
+                    if (threadTs != null) {
+                        req.threadTs(threadTs);
+                    }
+                    return req;
+                });
+            } else if (ctx instanceof SlashCommandContext) {
+                var builder = ((SlashCommandContext) ctx).client().chatPostMessage(r -> {
+                    var req = r.channel(channel).text(message);
+                    if (threadTs != null) {
+                        req.threadTs(threadTs);
+                    }
+                    return req;
+                });
+            } else {
+                // Fallback to app client
+                var builder = slackApp.client().chatPostMessage(r -> {
+                    var req = r.channel(channel).text(message);
+                    if (threadTs != null) {
+                        req.threadTs(threadTs);
+                    }
+                    return req;
+                });
+            }
+        } catch (Exception e) {
+            logger.error("Failed to send threaded message to channel {}: ", channel, e);
+        }
+    }
+    
+    private void addReaction(String channel, String timestamp, String reaction, Object ctx) {
+        try {
+            if (ctx instanceof EventContext) {
+                ((EventContext) ctx).client().reactionsAdd(r -> r
+                    .channel(channel)
+                    .timestamp(timestamp)
+                    .name(reaction)
+                );
+            } else if (ctx instanceof SlashCommandContext) {
+                ((SlashCommandContext) ctx).client().reactionsAdd(r -> r
+                    .channel(channel)
+                    .timestamp(timestamp)
+                    .name(reaction)
+                );
+            } else {
+                // Fallback to app client
+                slackApp.client().reactionsAdd(r -> r
+                    .channel(channel)
+                    .timestamp(timestamp)
+                    .name(reaction)
+                );
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to add reaction '{}' to message: {}", reaction, e.getMessage());
+        }
+    }
+    
+    /**
+     * Extract the actual text response from the LLM Gateway JSON response
+     */
+    private String extractTextFromLlmResponse(String llmResponseJson) {
+        try {
+            // Parse the JSON response to extract the text
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode rootNode = mapper.readTree(llmResponseJson);
+            JsonNode generations = rootNode.get("generations");
+            
+            if (generations != null && generations.isArray() && generations.size() > 0) {
+                JsonNode firstGeneration = generations.get(0);
+                JsonNode textNode = firstGeneration.get("text");
+                if (textNode != null) {
+                    return textNode.asText();
+                }
+            }
+            
+            // Fallback if we can't parse the response
+            return "Unable to parse response from LLM";
+            
+        } catch (Exception e) {
+            logger.error("Failed to parse LLM response JSON: ", e);
+            return "Error parsing LLM response: " + e.getMessage();
         }
     }
 }

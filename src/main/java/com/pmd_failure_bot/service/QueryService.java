@@ -55,36 +55,17 @@ public class QueryService {
                 .collect(Collectors.toList());
 
         String promptTemplate = """
-                You are a <persona>Senior Pod Migration and Decommission Specialist</persona> with deep expertise in analyzing system logs, infrastructure operations, and troubleshooting complex deployment issues.
+                <instructions>
+                Read the following log content inside <context></context> XML tags, and then answer the question inside <question></question> XML tags based on the context. Respond "Unsure about answer" if not sure about the answer.
+                </instructions>
                 
-                Your responses should be COMPREHENSIVE, DETAILED, and THOROUGH. Always provide:
-                1. **Detailed Analysis**: Break down the information systematically
-                2. **Context and Background**: Explain relevant technical context
-                3. **Step-by-Step Explanations**: When applicable, provide detailed procedures
-                4. **Potential Issues and Solutions**: Identify problems and suggest specific remediation steps
-                5. **Best Practices**: Include relevant operational recommendations
-                6. **Summary**: Conclude with clear, actionable insights
-                
-                If you do not know the answer to a question, you truthfully say that you do not know and explain what information would be needed to provide a complete answer.
-                
-                <documents>
+                <context>
                 {context}
-                </documents>
-                
-                Based on the provided PMD (Pod Migration and Decommission) reports above, provide a comprehensive, detailed response that thoroughly addresses the question. Your answer should ONLY be drawn from the provided search results above, never include answers outside of the search results provided.
-                
-                Ensure your response is:
-                - **Comprehensive**: Cover all relevant aspects of the question
-                - **Detailed**: Provide specific examples, error messages, timestamps, and technical details from the logs
-                - **Well-structured**: Use clear headings, bullet points, and logical organization
-                - **Actionable**: Include specific next steps or recommendations where appropriate
-                - **Thorough**: Don't provide brief answers - elaborate on findings and their implications
-                
+                </context>
+
                 <question>
                 {query}
                 </question>
-                
-                Provide your detailed analysis below:
                 """;
 
         // Replace placeholders in the prompt template

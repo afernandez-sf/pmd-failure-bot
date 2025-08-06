@@ -16,7 +16,7 @@ public class SalesforceLlmGatewayConfig {
     private String clientFeatureId = "EinsteinDocsAnswers";
     private String model = "llmgateway__VertexAIGeminiPro25";
     private double temperature = 0.7;
-    private int maxTokens = 8192;
+    private int maxTokens = 1024;
     private int timeoutSeconds = 180;
     
     public SalesforceLlmGatewayConfig() {}
