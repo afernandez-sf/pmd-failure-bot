@@ -182,17 +182,20 @@ public class SlackService {
             String formattedResponse = formatSlackResponse(response, queryText);
             sendMessageInThread(channel, formattedResponse, ctx, threadTs);
             
-            // Add completion reaction
+            // Remove processing reaction and add completion reaction
+            removeReaction(channel, threadTs, "eyes", ctx);
             addReaction(channel, threadTs, "white_check_mark", ctx);
             
         } catch (IllegalArgumentException e) {
             logger.warn("Invalid query from user {}: {}", userId, e.getMessage());
             String errorMsg = "❌ **Error**: " + e.getMessage() + "\n\n" + getUsageHelp();
             sendMessageInThread(channel, errorMsg, ctx, threadTs);
+            removeReaction(channel, threadTs, "eyes", ctx);
             addReaction(channel, threadTs, "x", ctx);
         } catch (Exception e) {
             logger.error("Error processing query from user {}: ", userId, e);
             sendMessageInThread(channel, "❌ Sorry, I encountered an error processing your request. Please try again later.", ctx, threadTs);
+            removeReaction(channel, threadTs, "eyes", ctx);
             addReaction(channel, threadTs, "x", ctx);
         }
     }
@@ -388,6 +391,49 @@ public class SlackService {
             }
         } catch (Exception e) {
             logger.debug("Failed to add reaction '{}' to message: {}", reaction, e.getMessage());
+        }
+    }
+    
+    private void removeReaction(String channel, String timestamp, String reaction, Object ctx) {
+        try {
+            logger.info("Removing reaction '{}' from message {} in channel {}", reaction, timestamp, channel);
+            if (ctx instanceof EventContext) {
+                var response = ((EventContext) ctx).client().reactionsRemove(r -> r
+                    .channel(channel)
+                    .timestamp(timestamp)
+                    .name(reaction)
+                );
+                if (response.isOk()) {
+                    logger.info("Successfully removed reaction '{}'", reaction);
+                } else {
+                    logger.debug("Could not remove reaction '{}': {} (may not exist)", reaction, response.getError());
+                }
+            } else if (ctx instanceof SlashCommandContext) {
+                var response = ((SlashCommandContext) ctx).client().reactionsRemove(r -> r
+                    .channel(channel)
+                    .timestamp(timestamp)
+                    .name(reaction)
+                );
+                if (response.isOk()) {
+                    logger.info("Successfully removed reaction '{}'", reaction);
+                } else {
+                    logger.debug("Could not remove reaction '{}': {} (may not exist)", reaction, response.getError());
+                }
+            } else {
+                // Fallback to app client
+                var response = slackApp.client().reactionsRemove(r -> r
+                    .channel(channel)
+                    .timestamp(timestamp)
+                    .name(reaction)
+                );
+                if (response.isOk()) {
+                    logger.info("Successfully removed reaction '{}'", reaction);
+                } else {
+                    logger.debug("Could not remove reaction '{}': {} (may not exist)", reaction, response.getError());
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Exception removing reaction '{}' from message: {}", reaction, e.getMessage());
         }
     }
     
