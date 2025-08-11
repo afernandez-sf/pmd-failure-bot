@@ -6,8 +6,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDate;
 import java.util.List;
+
 
 @Repository
 public interface PmdReportRepository extends JpaRepository<PmdReport, Long> {
@@ -16,10 +16,10 @@ public interface PmdReportRepository extends JpaRepository<PmdReport, Long> {
            "(:recordId IS NULL OR p.recordId = :recordId) AND " +
            "(:workId IS NULL OR p.workId = :workId) AND " +
            "(:caseNumber IS NULL OR p.caseNumber = :caseNumber) AND " +
-           "(:stepName IS NULL OR p.stepName = :stepName) AND " +
+           "(:stepName IS NULL OR p.stepName LIKE :stepName) AND " +
            "(:attachmentId IS NULL OR p.attachmentId = :attachmentId) AND " +
            "(:hostname IS NULL OR p.hostname = :hostname) AND " +
-           "(:reportDate IS NULL OR p.reportDate = :reportDate)")
+           "(:reportDate IS NULL OR p.reportDate = CAST(:reportDate AS DATE))")
     List<PmdReport> findByFilters(
             @Param("recordId") String recordId,
             @Param("workId") String workId,
@@ -27,6 +27,6 @@ public interface PmdReportRepository extends JpaRepository<PmdReport, Long> {
             @Param("stepName") String stepName,
             @Param("attachmentId") String attachmentId,
             @Param("hostname") String hostname,
-            @Param("reportDate") LocalDate reportDate
+            @Param("reportDate") String reportDate
     );
 } 

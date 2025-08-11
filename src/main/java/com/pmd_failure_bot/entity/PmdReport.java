@@ -29,15 +29,11 @@ public class PmdReport {
     @Column(name = "hostname")
     private String hostname;
     
-
-    
     @Column(name = "content", columnDefinition = "TEXT")
     private String content;
     
     @Column(name = "report_date")
     private LocalDate reportDate;
-    
-
 
     public Long getId() {
         return id;
@@ -94,8 +90,6 @@ public class PmdReport {
     public void setHostname(String hostname) {
         this.hostname = hostname;
     }
-
-
 
     public String getContent() {
         return content;

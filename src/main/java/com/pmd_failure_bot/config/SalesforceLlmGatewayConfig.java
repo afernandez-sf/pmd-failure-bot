@@ -9,15 +9,15 @@ public class SalesforceLlmGatewayConfig {
     
     private String gatewayUrl;
     private String orgId;
-    private String llmProvider = "Bedrock";
-    private String authScheme = "API_KEY";
+    private String llmProvider;
+    private String authScheme;
     private String authToken;
     private String tenantId;
-    private String clientFeatureId = "EinsteinDocsAnswers";
-    private String model = "llmgateway__VertexAIGeminiPro25";
-    private double temperature = 0.7;
-    private int maxTokens = 1024;
-    private int timeoutSeconds = 180;
+    private String clientFeatureId;
+    private String model;
+    private double temperature;
+    private int maxTokens;
+    private int timeoutSeconds;
     
     public SalesforceLlmGatewayConfig() {}
 

@@ -88,10 +88,6 @@ public class SlackService {
         }
     }
 
-
-
-
-
     private void processQueryAndRespond(String queryText, String channel, Object ctx, String userId, String threadTs) {
         try {
             // Add reaction to show we're processing

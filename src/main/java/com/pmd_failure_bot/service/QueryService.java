@@ -35,14 +35,26 @@ public class QueryService {
             throw new IllegalArgumentException("At least one filter field must be provided (step_name, work_id, case_number, record_id, attachment_id, hostname, or report_date)");
         }
 
+        // Prepare step name for "starts with" matching by adding wildcard
+        String stepNamePattern = request.getStepName();
+        if (stepNamePattern != null) {
+            stepNamePattern = stepNamePattern + "%";
+        }
+        
+        // Convert LocalDate to String for PostgreSQL compatibility
+        String reportDateString = null;
+        if (request.getReportDate() != null) {
+            reportDateString = request.getReportDate().toString(); // YYYY-MM-DD format
+        }
+        
         List<PmdReport> reports = pmdReportRepository.findByFilters(
                 request.getRecordId(),
                 request.getWorkId(),
                 request.getCaseNumber(),
-                request.getStepName(),
+                stepNamePattern,
                 request.getAttachmentId(),
                 request.getHostname(),
-                request.getReportDate()
+                reportDateString
         );
 
         String llmContext = prepareContextFromReports(reports);
