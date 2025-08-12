@@ -1,11 +1,15 @@
 package com.pmd_failure_bot.controller;
 
+import com.pmd_failure_bot.dto.LogImportRequest;
+import com.pmd_failure_bot.dto.LogImportResponse;
 import com.pmd_failure_bot.dto.NaturalLanguageQueryRequest;
 import com.pmd_failure_bot.dto.NaturalLanguageQueryResponse;
 import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.dto.QueryResponse;
+import com.pmd_failure_bot.service.LogProcessingService;
 import com.pmd_failure_bot.service.NaturalLanguageProcessingService;
 import com.pmd_failure_bot.service.QueryService;
+import com.pmd_failure_bot.service.SalesforceService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,11 +29,16 @@ public class NaturalLanguageController {
     
     private final NaturalLanguageProcessingService nlpService;
     private final QueryService queryService;
+    private final SalesforceService salesforceService;
+    private final LogProcessingService logProcessingService;
     
     @Autowired
-    public NaturalLanguageController(NaturalLanguageProcessingService nlpService, QueryService queryService) {
+    public NaturalLanguageController(NaturalLanguageProcessingService nlpService, QueryService queryService,
+                                   SalesforceService salesforceService, LogProcessingService logProcessingService) {
         this.nlpService = nlpService;
         this.queryService = queryService;
+        this.salesforceService = salesforceService;
+        this.logProcessingService = logProcessingService;
     }
     
     /**
@@ -53,13 +62,19 @@ public class NaturalLanguageController {
             
             QueryRequest structuredQuery = extractionResult.getQueryRequest();
             double confidence = extractionResult.getConfidence();
+            String intent = extractionResult.getIntent();
             
-            logger.info("Extracted parameters - Case: {}, Step: {}, Host: {}, Date: {}, Confidence: {} (Method: {})", 
+            logger.info("Extracted parameters - Case: {}, Step: {}, Host: {}, Date: {}, Intent: {}, Confidence: {} (Method: {})", 
                        structuredQuery.getCaseNumber(), structuredQuery.getStepName(), 
                        structuredQuery.getHostname(), structuredQuery.getReportDate(), 
-                       confidence, extractionResult.getExtractionMethod());
+                       intent, confidence, extractionResult.getExtractionMethod());
             
-            // Step 2: Validate that we have enough filters to proceed
+            // Check if this is an import request
+            if (extractionResult.isImportRequest()) {
+                return handleImportRequest(request, extractionResult, conversationId, startTime);
+            }
+            
+            // Step 2: Validate that we have enough filters to proceed (for queries)
             if (isAllFiltersEmpty(structuredQuery)) {
                 NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
                     "I need more specific information to search the logs. Please mention at least one of: " +
@@ -146,6 +161,122 @@ public class NaturalLanguageController {
         return ResponseEntity.ok(help);
     }
     
+    /**
+     * Handle import requests through natural language
+     */
+    private ResponseEntity<NaturalLanguageQueryResponse> handleImportRequest(
+            NaturalLanguageQueryRequest request, 
+            NaturalLanguageProcessingService.ParameterExtractionResult extractionResult,
+            String conversationId, 
+            long startTime) {
+        
+        try {
+            QueryRequest structuredQuery = extractionResult.getQueryRequest();
+            
+            // Create LogImportRequest from QueryRequest
+            LogImportRequest importRequest = new LogImportRequest();
+            importRequest.setCaseNumber(structuredQuery.getCaseNumber());
+            importRequest.setStepName(structuredQuery.getStepName());
+            
+            // Validate that we have either case number or step name
+            if (importRequest.getCaseNumber() == null && 
+                (importRequest.getStepName() == null || importRequest.getStepName().trim().isEmpty())) {
+                
+                NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
+                    "I need either a case number or step name to import logs. " +
+                    "For example: 'Import logs for case 123456' or 'Pull logs from SSH_TO_ALL_HOSTS step'",
+                    structuredQuery,
+                    List.of(),
+                    extractionResult.getConfidence(),
+                    LocalDateTime.now(),
+                    System.currentTimeMillis() - startTime
+                );
+                errorResponse.setConversationId(conversationId);
+                return ResponseEntity.badRequest().body(errorResponse);
+            }
+            
+            String importStatus;
+            String searchCriteria;
+            
+            // Determine search criteria
+            if (importRequest.getCaseNumber() != null) {
+                searchCriteria = "case " + importRequest.getCaseNumber();
+            } else {
+                searchCriteria = "step " + importRequest.getStepName();
+            }
+            
+            // Actually perform the import
+            try {
+                java.util.List<java.util.Map<String, Object>> salesforceRecords;
+                
+                if (importRequest.getCaseNumber() != null) {
+                    salesforceRecords = salesforceService.queryFailedAttachmentsByCaseNumber(importRequest.getCaseNumber());
+                } else {
+                    salesforceRecords = salesforceService.queryFailedStepAttachments(importRequest.getStepName());
+                }
+                
+                if (salesforceRecords.isEmpty()) {
+                    importStatus = String.format("No failed attachments found for %s. " +
+                                               "There may be no failures to import, or they might already be processed.",
+                                               searchCriteria);
+                } else {
+                    // Delegate to the real import controller
+                    QueryController queryController = new QueryController(queryService, salesforceService, logProcessingService);
+                    ResponseEntity<LogImportResponse> importResponseEntity = queryController.importLogs(importRequest);
+                    LogImportResponse importResponse = importResponseEntity.getBody();
+                    
+                    int totalAttachments = importResponse.getTotalAttachments();
+                    int processedAttachments = importResponse.getProcessedAttachments();
+                    int skippedAttachments = importResponse.getSkippedAttachments();
+                    int successfulLogs = importResponse.getSuccessfulLogs();
+                    int failedLogs = importResponse.getFailedLogs();
+                    
+                    importStatus = String.format("✅ Import completed for %s!\n" +
+                                               "📊 Processed %d/%d attachments (%d skipped)\n" +
+                                               "📝 Imported %d logs successfully (%d failed)\n" +
+                                               "💡 You can now query with: 'What issues occurred in %s?'",
+                                               searchCriteria, processedAttachments, totalAttachments, skippedAttachments,
+                                               successfulLogs, failedLogs, searchCriteria);
+                }
+            } catch (Exception importException) {
+                logger.error("Error during actual import for {}: ", searchCriteria, importException);
+                importStatus = String.format("❌ Import failed for %s: %s\n" +
+                                           "Please try again or contact support.",
+                                           searchCriteria, importException.getMessage());
+            }
+            
+            long executionTimeMs = System.currentTimeMillis() - startTime;
+            logger.info("Successfully processed import request for {} in {}ms (conversation: {})", 
+                       searchCriteria, executionTimeMs, conversationId);
+            
+            NaturalLanguageQueryResponse response = new NaturalLanguageQueryResponse(
+                importStatus,
+                structuredQuery,
+                List.of(), // No reports for import requests
+                extractionResult.getConfidence(),
+                LocalDateTime.now(),
+                executionTimeMs
+            );
+            response.setConversationId(conversationId);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error processing import request (conversation: {}): ", conversationId, e);
+            
+            NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
+                "I encountered an error while processing your import request. Please try again later or contact support if the issue persists.",
+                new QueryRequest(),
+                List.of(),
+                0.0,
+                LocalDateTime.now(),
+                System.currentTimeMillis() - startTime
+            );
+            errorResponse.setConversationId(conversationId);
+            return ResponseEntity.internalServerError().body(errorResponse);
+        }
+    }
+
     /**
      * Check if all filter fields are empty (same logic as QueryService)
      */

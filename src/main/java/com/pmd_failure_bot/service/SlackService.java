@@ -2,6 +2,9 @@ package com.pmd_failure_bot.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pmd_failure_bot.controller.QueryController;
+import com.pmd_failure_bot.dto.LogImportRequest;
+import com.pmd_failure_bot.dto.LogImportResponse;
 import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.dto.QueryResponse;
 import com.pmd_failure_bot.service.NaturalLanguageProcessingService;
@@ -12,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -21,6 +25,8 @@ public class SlackService {
     private final NaturalLanguageProcessingService nlpService;
     private final QueryService queryService;
     private final App slackApp;
+    private final SalesforceService salesforceService;
+    private final LogProcessingService logProcessingService;
     
     // Simple cache to prevent duplicate processing of the same message
     private final java.util.Set<String> processedMessages = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -29,10 +35,13 @@ public class SlackService {
     private String botChannelName;
 
     @Autowired
-    public SlackService(NaturalLanguageProcessingService nlpService, QueryService queryService, App slackApp) {
+    public SlackService(NaturalLanguageProcessingService nlpService, QueryService queryService, App slackApp,
+                       SalesforceService salesforceService, LogProcessingService logProcessingService) {
         this.nlpService = nlpService;
         this.queryService = queryService;
         this.slackApp = slackApp;
+        this.salesforceService = salesforceService;
+        this.logProcessingService = logProcessingService;
         initializeSlackHandlers();
     }
 
@@ -93,16 +102,22 @@ public class SlackService {
                 nlpService.extractParameters(queryText, null);
             
             QueryRequest queryRequest = extractionResult.getQueryRequest();
-            logger.info("NLP extracted parameters - Case: {}, Step: {}, Host: {}, Date: {}, Confidence: {} (Method: {})", 
+            logger.info("NLP extracted parameters - Case: {}, Step: {}, Host: {}, Date: {}, Intent: {}, Confidence: {} (Method: {})", 
                        queryRequest.getCaseNumber(), queryRequest.getStepName(), 
                        queryRequest.getHostname(), queryRequest.getReportDate(),
-                       extractionResult.getConfidence(), extractionResult.getExtractionMethod());
+                       extractionResult.getIntent(), extractionResult.getConfidence(), extractionResult.getExtractionMethod());
             
-            // Process the structured query
-            QueryResponse response = queryService.processQuery(queryRequest);
+            String formattedResponse;
             
-            // Format and send the response with NLP info
-            String formattedResponse = formatSlackResponseWithNLP(response, queryText, extractionResult);
+            if (extractionResult.isImportRequest()) {
+                // Handle import request
+                formattedResponse = processImportRequest(queryRequest, queryText, extractionResult, channel, threadTs);
+            } else {
+                // Handle query request
+                QueryResponse response = queryService.processQuery(queryRequest);
+                formattedResponse = formatSlackResponseWithNLP(response, queryText, extractionResult);
+            }
+            
             sendMessageInThread(channel, formattedResponse, ctx, threadTs);
             
             // Remove processing reaction and add completion reaction
@@ -127,7 +142,71 @@ public class SlackService {
         }
     }
 
-    // Legacy regex parsing method removed - now using NaturalLanguageProcessingService for parameter extraction
+    /**
+     * Process import request from Slack
+     */
+    private String processImportRequest(QueryRequest queryRequest, String originalQuery, 
+                                      NaturalLanguageProcessingService.ParameterExtractionResult extractionResult,
+                                      String channelId, String messageTs) {
+        try {
+            // Create LogImportRequest from QueryRequest
+            LogImportRequest importRequest = new LogImportRequest();
+            importRequest.setCaseNumber(queryRequest.getCaseNumber());
+            importRequest.setStepName(queryRequest.getStepName());
+            
+            // Validate that we have either case number or step name
+            if (importRequest.getCaseNumber() == null && 
+                (importRequest.getStepName() == null || importRequest.getStepName().trim().isEmpty())) {
+                return "❌ *Error*: I need either a case number or step name to import logs.\n\n" +
+                       "*💡 Try queries like:*\n" +
+                       "• `Import logs for case 123456`\n" +
+                       "• `Pull logs from SSH_TO_ALL_HOSTS step`\n" +
+                       "• `Fetch GRIDFORCE_APP_LOG_COPY logs`";
+            }
+            
+            String searchCriteria;
+            if (importRequest.getCaseNumber() != null) {
+                searchCriteria = "case " + importRequest.getCaseNumber();
+            } else {
+                searchCriteria = "step " + importRequest.getStepName();
+            }
+            
+            // Start background processing in a separate thread
+            new Thread(() -> {
+                try {
+                    // Change emoji to spinning arrows (processing)
+                    updateReaction(channelId, messageTs, "eyes", "arrows_counterclockwise");
+                    
+                    // Perform the actual import
+                    QueryController queryController = new QueryController(queryService, salesforceService, logProcessingService);
+                    ResponseEntity<LogImportResponse> importResponseEntity = queryController.importLogs(importRequest);
+                    LogImportResponse importResponse = importResponseEntity.getBody();
+                    
+                    // Change emoji to checkmark (completed)
+                    updateReaction(channelId, messageTs, "arrows_counterclockwise", "white_check_mark");
+                    
+                    // Send simple completion message in thread
+                    String completionMessage = String.format("Successfully imported %d logs for %s", 
+                                                            importResponse.getSuccessfulLogs(), searchCriteria);
+                    sendMessageInThread(channelId, completionMessage, null, messageTs);
+                    
+                } catch (Exception e) {
+                    logger.error("Background import failed: ", e);
+                    // Change emoji to X (failed)
+                    updateReaction(channelId, messageTs, "arrows_counterclockwise", "x");
+                    sendMessageInThread(channelId, "Import failed for " + searchCriteria + ": " + e.getMessage(), null, messageTs);
+                }
+            }).start();
+            
+            // Return empty string to avoid sending any message
+            return "";
+            
+        } catch (Exception e) {
+            logger.error("Error processing import request: ", e);
+            return "❌ *Error importing logs*: " + e.getMessage() + "\n\n" +
+                   "Please try again or contact support if the issue persists.";
+        }
+    }
 
     private String formatSlackResponseWithNLP(QueryResponse response, String originalQuery, 
                                               NaturalLanguageProcessingService.ParameterExtractionResult extractionResult) {
@@ -283,5 +362,34 @@ public class SlackService {
             return "No response received from LLM";
         }
         return llmResponse;
+    }
+
+    private void updateReaction(String channel, String timestamp, String oldEmoji, String newEmoji) {
+        try {
+            // Remove the old reaction first
+            removeReaction(channel, timestamp, oldEmoji, null);
+            
+            // Wait a bit to ensure the removal is processed
+            Thread.sleep(200);
+            
+            // Add the new reaction
+            addReaction(channel, timestamp, newEmoji, null);
+            
+            logger.info("Updated reaction from '{}' to '{}' on message {} in channel {}", 
+                       oldEmoji, newEmoji, timestamp, channel);
+        } catch (Exception e) {
+            logger.error("Failed to update reaction from '{}' to '{}': ", oldEmoji, newEmoji, e);
+        }
+    }
+
+    private void sendMessage(String channel, String message) {
+        try {
+            slackApp.client().chatPostMessage(r -> r
+                .channel(channel)
+                .text(message)
+            );
+        } catch (Exception e) {
+            logger.error("Failed to send message to channel {}: ", channel, e);
+        }
     }
 }
