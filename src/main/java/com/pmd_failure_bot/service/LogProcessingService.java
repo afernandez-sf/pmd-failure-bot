@@ -154,8 +154,8 @@ public class LogProcessingService {
     }
     
     private boolean isAttachmentProcessed(String attachmentId) {
-        return pmdReportRepository.findByFilters(null, null, null, null, attachmentId, 
-                                                null, null).size() > 0;
+        return pmdReportRepository.findByFiltersWithoutDate(null, null, null, null, attachmentId, 
+                                                null).size() > 0;
     }
     
     private String sanitizeFileName(String fileName) {

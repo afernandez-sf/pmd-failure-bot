@@ -81,6 +81,18 @@ public class SalesforceLlmGatewayService {
                     JsonNode responseJson = objectMapper.readTree(responseBody);
                     
                     // Handle Salesforce LLM Gateway response format
+                    // Check for generations array (Gemini format)
+                    if (responseJson.has("generations") && responseJson.get("generations").isArray() && 
+                        responseJson.get("generations").size() > 0) {
+                        JsonNode firstGeneration = responseJson.get("generations").get(0);
+                        
+                        // Check for text field in generation
+                        if (firstGeneration.has("text")) {
+                            return firstGeneration.get("text").asText();
+                        }
+                    }
+                    
+                    // Check for choices array (OpenAI format)
                     if (responseJson.has("choices") && responseJson.get("choices").isArray() && 
                         responseJson.get("choices").size() > 0) {
                         JsonNode firstChoice = responseJson.get("choices").get(0);

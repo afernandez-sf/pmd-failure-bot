@@ -4,27 +4,21 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.dto.QueryResponse;
+import com.pmd_failure_bot.service.NaturalLanguageProcessingService;
 import com.slack.api.bolt.App;
 import com.slack.api.bolt.context.builtin.EventContext;
-
 import com.slack.api.model.event.AppMentionEvent;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 @Service
 public class SlackService {
 
     private static final Logger logger = LoggerFactory.getLogger(SlackService.class);
+    private final NaturalLanguageProcessingService nlpService;
     private final QueryService queryService;
     private final App slackApp;
     
@@ -35,7 +29,8 @@ public class SlackService {
     private String botChannelName;
 
     @Autowired
-    public SlackService(QueryService queryService, App slackApp) {
+    public SlackService(NaturalLanguageProcessingService nlpService, QueryService queryService, App slackApp) {
+        this.nlpService = nlpService;
         this.queryService = queryService;
         this.slackApp = slackApp;
         initializeSlackHandlers();
@@ -93,17 +88,21 @@ public class SlackService {
             // Add reaction to show we're processing
             addReaction(channel, threadTs, "eyes", ctx);
             
-            // Parse the query to extract parameters
-            QueryRequest queryRequest = parseQueryFromText(queryText);
-            logger.info("Parsed query - Case: {}, Step: {}, Host: {}, Date: {}, Query: '{}'", 
-                       queryRequest.getCaseNumber(), queryRequest.getStepName(), 
-                       queryRequest.getHostname(), queryRequest.getReportDate(), queryRequest.getQuery());
+            // Use natural language processing to extract parameters
+            NaturalLanguageProcessingService.ParameterExtractionResult extractionResult = 
+                nlpService.extractParameters(queryText, null);
             
-            // Process the query
+            QueryRequest queryRequest = extractionResult.getQueryRequest();
+            logger.info("NLP extracted parameters - Case: {}, Step: {}, Host: {}, Date: {}, Confidence: {} (Method: {})", 
+                       queryRequest.getCaseNumber(), queryRequest.getStepName(), 
+                       queryRequest.getHostname(), queryRequest.getReportDate(),
+                       extractionResult.getConfidence(), extractionResult.getExtractionMethod());
+            
+            // Process the structured query
             QueryResponse response = queryService.processQuery(queryRequest);
             
-            // Format and send the response
-            String formattedResponse = formatSlackResponse(response, queryText);
+            // Format and send the response with NLP info
+            String formattedResponse = formatSlackResponseWithNLP(response, queryText, extractionResult);
             sendMessageInThread(channel, formattedResponse, ctx, threadTs);
             
             // Remove processing reaction and add completion reaction
@@ -113,9 +112,10 @@ public class SlackService {
         } catch (IllegalArgumentException e) {
             logger.warn("Invalid query from user {}: {}", userId, e.getMessage());
             String errorMsg = "❌ *Error*: " + e.getMessage() + "\n\n" + 
-                             "*Usage*: Mention me with query parameters like:\n" +
-                             "• `case_number:123456 What went wrong?`\n" +
-                             "• `step_name:SSH_TO_ALL_HOSTS host:hn3 date:2024-04-21 What errors occurred?`";
+                             "*💡 Try natural language queries like:*\n" +
+                             "• `What went wrong with case 123456?`\n" +
+                             "• `Show me SSH failures from yesterday`\n" +
+                             "• `Why did the GridForce deployment fail on CS58?`";
             sendMessageInThread(channel, errorMsg, ctx, threadTs);
             removeReaction(channel, threadTs, "eyes", ctx);
             addReaction(channel, threadTs, "x", ctx);
@@ -127,61 +127,16 @@ public class SlackService {
         }
     }
 
-    private QueryRequest parseQueryFromText(String text) {
-        QueryRequest request = new QueryRequest();
-        
-        // No default values - let them be null so they don't filter the query
-        
-        // Extract parameters using patterns
-        // Pattern for case number: case_number:123456 or case_number=123456
-        Pattern casePattern = Pattern.compile("(?:case_number[:=])(\\d+)", Pattern.CASE_INSENSITIVE);
-        Matcher caseMatcher = casePattern.matcher(text);
-        if (caseMatcher.find()) {
-            request.setCaseNumber(Integer.parseInt(caseMatcher.group(1)));
-            text = text.replaceAll(casePattern.pattern(), "").trim();
-        }
-        
-        // Pattern for step name: step:stepname or step=stepname
-        Pattern stepPattern = Pattern.compile("(?:step[:=])([\\w-]+)", Pattern.CASE_INSENSITIVE);
-        Matcher stepMatcher = stepPattern.matcher(text);
-        if (stepMatcher.find()) {
-            request.setStepName(stepMatcher.group(1));
-            text = text.replaceAll(stepPattern.pattern(), "").trim();
-        }
-        
-        // Pattern for date: date:2024-01-01 or date=2024-01-01
-        Pattern datePattern = Pattern.compile("(?:date[:=])(\\d{4}-\\d{2}-\\d{2})", Pattern.CASE_INSENSITIVE);
-        Matcher dateMatcher = datePattern.matcher(text);
-        if (dateMatcher.find()) {
-            try {
-                request.setReportDate(LocalDate.parse(dateMatcher.group(1)));
-                text = text.replaceAll(datePattern.pattern(), "").trim();
-            } catch (DateTimeParseException e) {
-                throw new IllegalArgumentException("Invalid date format. Please use YYYY-MM-DD format.");
-            }
-        }
-        
-        // Note: File path field has been removed from the new schema
-        
-        // Pattern for hostname: host:hostname or host=hostname
-        Pattern hostPattern = Pattern.compile("(?:host[:=])([^\\s]+)", Pattern.CASE_INSENSITIVE);
-        Matcher hostMatcher = hostPattern.matcher(text);
-        if (hostMatcher.find()) {
-            request.setHostname(hostMatcher.group(1));
-            text = text.replaceAll(hostPattern.pattern(), "").trim();
-        }
-        
-        // The remaining text is the query
-        if (text.trim().isEmpty()) {
-            throw new IllegalArgumentException("Please provide a query. Example: 'What deployment issues occurred today?'");
-        }
-        
-        request.setQuery(text.trim());
-        return request;
-    }
+    // Legacy regex parsing method removed - now using NaturalLanguageProcessingService for parameter extraction
 
-    private String formatSlackResponse(QueryResponse response, String originalQuery) {
+    private String formatSlackResponseWithNLP(QueryResponse response, String originalQuery, 
+                                              NaturalLanguageProcessingService.ParameterExtractionResult extractionResult) {
         StringBuilder sb = new StringBuilder();
+        
+        // Add confidence indicator if using LLM extraction
+        if ("LLM_EXTRACTION".equals(extractionResult.getExtractionMethod()) && extractionResult.getConfidence() < 0.7) {
+            sb.append("🤔 *I'm not completely sure I understood your query correctly.*\n\n");
+        }
         
         // Extract the actual text response from the LLM JSON
         String analysisText = extractTextFromLlmResponse(response.getLlmResponse());
@@ -192,12 +147,53 @@ public class SlackService {
             for (QueryResponse.ReportInfo reportInfo : response.getReports()) {
                 // Convert Salesforce record ID to GUS work item URL
                 String gusUrl = "https://gus.lightning.force.com/lightning/r/ADM_Work__c/" + reportInfo.getPath() + "/view";
-                sb.append("• ").append(gusUrl).append("\n");
+                
+                // Use work ID as display text if available, otherwise fall back to record ID
+                String displayText = reportInfo.getWorkId() != null && !reportInfo.getWorkId().equals("N/A") 
+                    ? reportInfo.getWorkId() 
+                    : reportInfo.getPath();
+                
+                // Format as Slack clickable link: <url|text>
+                sb.append("• <").append(gusUrl).append("|").append(displayText).append(">\n");
             }
+        }
+        
+        // Add extracted parameters info for transparency (if low confidence)
+        if (extractionResult.getConfidence() < 0.6) {
+            sb.append("\n\n_🔍 I extracted these parameters: ");
+            QueryRequest params = extractionResult.getQueryRequest();
+            boolean hasParams = false;
+            
+            if (params.getCaseNumber() != null) {
+                sb.append("case ").append(params.getCaseNumber());
+                hasParams = true;
+            }
+            if (params.getStepName() != null) {
+                if (hasParams) sb.append(", ");
+                sb.append("step ").append(params.getStepName());
+                hasParams = true;
+            }
+            if (params.getHostname() != null) {
+                if (hasParams) sb.append(", ");
+                sb.append("host ").append(params.getHostname());
+                hasParams = true;
+            }
+            if (params.getReportDate() != null) {
+                if (hasParams) sb.append(", ");
+                sb.append("date ").append(params.getReportDate());
+                hasParams = true;
+            }
+            
+            if (!hasParams) {
+                sb.append("no specific filters");
+            }
+            sb.append("_");
         }
         
         return sb.toString();
     }
+    
+    // Legacy formatSlackResponse method removed - now using formatSlackResponseWithNLP
     
     private void sendMessageInThread(String channel, String message, Object ctx, String threadTs) {
         try {
@@ -278,29 +274,14 @@ public class SlackService {
     }
     
     /**
-     * Extract the actual text response from the LLM Gateway JSON response
+     * Extract the actual text response from the LLM Gateway response
+     * Note: SalesforceLlmGatewayService already extracts text from JSON, so this is plain text
      */
-    private String extractTextFromLlmResponse(String llmResponseJson) {
-        try {
-            // Parse the JSON response to extract the text
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode rootNode = mapper.readTree(llmResponseJson);
-            JsonNode generations = rootNode.get("generations");
-            
-            if (generations != null && generations.isArray() && generations.size() > 0) {
-                JsonNode firstGeneration = generations.get(0);
-                JsonNode textNode = firstGeneration.get("text");
-                if (textNode != null) {
-                    return textNode.asText();
-                }
-            }
-            
-            // Fallback if we can't parse the response
-            return "Unable to parse response from LLM";
-            
-        } catch (Exception e) {
-            logger.error("Failed to parse LLM response JSON: ", e);
-            return "Error parsing LLM response: " + e.getMessage();
+    private String extractTextFromLlmResponse(String llmResponse) {
+        // The SalesforceLlmGatewayService already handles JSON parsing and returns plain text
+        if (llmResponse == null || llmResponse.trim().isEmpty()) {
+            return "No response received from LLM";
         }
+        return llmResponse;
     }
 }

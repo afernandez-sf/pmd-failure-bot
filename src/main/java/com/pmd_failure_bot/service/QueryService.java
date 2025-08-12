@@ -41,27 +41,34 @@ public class QueryService {
             stepNamePattern = stepNamePattern + "%";
         }
         
-        // Convert LocalDate to String for PostgreSQL compatibility
-        String reportDateString = null;
+        List<PmdReport> reports;
         if (request.getReportDate() != null) {
-            reportDateString = request.getReportDate().toString(); // YYYY-MM-DD format
+            reports = pmdReportRepository.findByFiltersWithDate(
+                    request.getRecordId(),
+                    request.getWorkId(),
+                    request.getCaseNumber(),
+                    stepNamePattern,
+                    request.getAttachmentId(),
+                    request.getHostname(),
+                    request.getReportDate()
+            );
+        } else {
+            reports = pmdReportRepository.findByFiltersWithoutDate(
+                    request.getRecordId(),
+                    request.getWorkId(),
+                    request.getCaseNumber(),
+                    stepNamePattern,
+                    request.getAttachmentId(),
+                    request.getHostname()
+            );
         }
-        
-        List<PmdReport> reports = pmdReportRepository.findByFilters(
-                request.getRecordId(),
-                request.getWorkId(),
-                request.getCaseNumber(),
-                stepNamePattern,
-                request.getAttachmentId(),
-                request.getHostname(),
-                reportDateString
-        );
 
         String llmContext = prepareContextFromReports(reports);
         
         List<QueryResponse.ReportInfo> reportPaths = reports.stream()
                 .map(report -> new QueryResponse.ReportInfo(
-                        report.getRecordId() != null ? report.getRecordId() : "N/A"
+                        report.getRecordId() != null ? report.getRecordId() : "N/A",
+                        report.getWorkId() != null ? report.getWorkId() : "N/A"
                 ))
                 .collect(Collectors.toList());
 

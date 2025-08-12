@@ -12,13 +12,22 @@ public class QueryResponse {
 
     public static class ReportInfo {
         private String path;
+        private String workId;
 
         public ReportInfo(String path) {
             this.path = path;
         }
+        
+        public ReportInfo(String path, String workId) {
+            this.path = path;
+            this.workId = workId;
+        }
 
         public String getPath() { return path; }
         public void setPath(String path) { this.path = path; }
+        
+        public String getWorkId() { return workId; }
+        public void setWorkId(String workId) { this.workId = workId; }
     }
 
     public QueryResponse(String llmResponse, List<ReportInfo> reports, LocalDateTime executedAt, Long executionTimeMs) {
