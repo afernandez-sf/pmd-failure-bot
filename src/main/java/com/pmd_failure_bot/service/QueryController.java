@@ -1,4 +1,4 @@
-package com.pmd_failure_bot.controller;
+package com.pmd_failure_bot.service;
 
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;

@@ -7,6 +7,7 @@ import com.pmd_failure_bot.dto.NaturalLanguageQueryResponse;
 import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.dto.QueryResponse;
 import com.pmd_failure_bot.service.LogProcessingService;
+import com.pmd_failure_bot.service.LogImportService;
 import com.pmd_failure_bot.service.NaturalLanguageProcessingService;
 import com.pmd_failure_bot.service.QueryService;
 import com.pmd_failure_bot.service.SalesforceService;
@@ -194,8 +195,8 @@ public class NaturalLanguageController {
                                                searchCriteria);
                 } else {
                     // Delegate to the real import controller
-                    QueryController queryController = new QueryController(queryService, salesforceService, logProcessingService);
-                    ResponseEntity<LogImportResponse> importResponseEntity = queryController.importLogs(importRequest);
+                    LogImportService logImportService = new LogImportService(salesforceService, logProcessingService);
+                    ResponseEntity<LogImportResponse> importResponseEntity = logImportService.importLogs(importRequest);
                     LogImportResponse importResponse = importResponseEntity.getBody();
                     
                     int totalAttachments = importResponse.getTotalAttachments();

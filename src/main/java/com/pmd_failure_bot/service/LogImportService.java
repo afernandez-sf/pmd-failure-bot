@@ -1,4 +1,4 @@
-package com.pmd_failure_bot.controller;
+package com.pmd_failure_bot.service;
 
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;
@@ -15,13 +15,13 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-public class QueryController {
+public class LogImportService {
 
     private final SalesforceService salesforceService;
     private final LogProcessingService logProcessingService;
 
     @Autowired
-    public QueryController(SalesforceService salesforceService, 
+    public LogImportService(SalesforceService salesforceService, 
                           LogProcessingService logProcessingService) {
         this.salesforceService = salesforceService;
         this.logProcessingService = logProcessingService;

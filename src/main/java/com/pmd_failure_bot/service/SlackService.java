@@ -2,7 +2,7 @@ package com.pmd_failure_bot.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pmd_failure_bot.controller.QueryController;
+
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;
 import com.pmd_failure_bot.dto.QueryRequest;
@@ -178,8 +178,8 @@ public class SlackService {
                     updateReaction(channelId, messageTs, "eyes", "arrows_counterclockwise");
                     
                     // Perform the actual import
-                    QueryController queryController = new QueryController(queryService, salesforceService, logProcessingService);
-                    ResponseEntity<LogImportResponse> importResponseEntity = queryController.importLogs(importRequest);
+                    LogImportService logImportService = new LogImportService(salesforceService, logProcessingService);
+                    ResponseEntity<LogImportResponse> importResponseEntity = logImportService.importLogs(importRequest);
                     LogImportResponse importResponse = importResponseEntity.getBody();
                     
                     // Change emoji to checkmark (completed)
