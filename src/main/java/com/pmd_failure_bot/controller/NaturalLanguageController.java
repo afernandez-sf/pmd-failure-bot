@@ -10,6 +10,7 @@ import com.pmd_failure_bot.service.LogProcessingService;
 import com.pmd_failure_bot.service.NaturalLanguageProcessingService;
 import com.pmd_failure_bot.service.QueryService;
 import com.pmd_failure_bot.service.SalesforceService;
+import com.pmd_failure_bot.service.DatabaseQueryService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 @RestController
@@ -31,14 +33,17 @@ public class NaturalLanguageController {
     private final QueryService queryService;
     private final SalesforceService salesforceService;
     private final LogProcessingService logProcessingService;
+    private final DatabaseQueryService databaseQueryService;
     
     @Autowired
     public NaturalLanguageController(NaturalLanguageProcessingService nlpService, QueryService queryService,
-                                   SalesforceService salesforceService, LogProcessingService logProcessingService) {
+                                   SalesforceService salesforceService, LogProcessingService logProcessingService,
+                                   DatabaseQueryService databaseQueryService) {
         this.nlpService = nlpService;
         this.queryService = queryService;
         this.salesforceService = salesforceService;
         this.logProcessingService = logProcessingService;
+        this.databaseQueryService = databaseQueryService;
     }
     
     /**
@@ -74,42 +79,10 @@ public class NaturalLanguageController {
                 return handleImportRequest(request, extractionResult, conversationId, startTime);
             }
             
-            // Step 2: Validate that we have enough filters to proceed (for queries)
-            if (isAllFiltersEmpty(structuredQuery)) {
-                NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
-                    "I need more specific information to search the logs. Please mention at least one of: " +
-                    "case number, step name, hostname, work ID, record ID, attachment ID, or date. " +
-                    "For example: 'What went wrong with case 123456?' or 'Show me SSH failures from yesterday'",
-                    structuredQuery,
-                    List.of(),
-                    confidence,
-                    LocalDateTime.now(),
-                    System.currentTimeMillis() - startTime
-                );
-                errorResponse.setConversationId(conversationId);
-                return ResponseEntity.badRequest().body(errorResponse);
-            }
-            
-            // Step 3: Execute the structured query
-            QueryResponse queryResponse = queryService.processQuery(structuredQuery);
-            
-            // Step 4: Format the response
-            long executionTimeMs = System.currentTimeMillis() - startTime;
-            
-            NaturalLanguageQueryResponse response = new NaturalLanguageQueryResponse(
-                queryResponse.getLlmResponse(),
-                structuredQuery,
-                queryResponse.getReports(),
-                confidence,
-                LocalDateTime.now(),
-                executionTimeMs
-            );
-            response.setConversationId(conversationId);
-            
-            logger.info("Successfully processed natural language query in {}ms (conversation: {})", 
-                       executionTimeMs, conversationId);
-            
-            return ResponseEntity.ok(response);
+            // Step 2: Always use function calling for natural language queries
+            // The old parameter extraction is kept for import request detection only
+            logger.info("🔀 Routing to function calling (natural language query): {}", request.getQuery());
+            return handleNaturalLanguageQuery(request, conversationId, startTime);
             
         } catch (IllegalArgumentException e) {
             logger.warn("Invalid query parameters for conversation {}: {}", conversationId, e.getMessage());
@@ -288,6 +261,90 @@ public class NaturalLanguageController {
                (request.getAttachmentId() == null || request.getAttachmentId().trim().isEmpty()) &&
                (request.getHostname() == null || request.getHostname().trim().isEmpty()) &&
                request.getReportDate() == null;
+    }
+    
+    /**
+     * Handle pure natural language queries using function calling
+     */
+    private ResponseEntity<NaturalLanguageQueryResponse> handleNaturalLanguageQuery(
+            NaturalLanguageQueryRequest request, String conversationId, long startTime) {
+        
+        try {
+            logger.info("🤖 Processing natural language query with function calling: {}", request.getQuery());
+            
+            // Use DatabaseQueryService for function calling
+            DatabaseQueryService.DatabaseQueryResult result = 
+                databaseQueryService.processNaturalLanguageQuery(request.getQuery());
+            
+            if (result.isSuccessful()) {
+                // Convert results to report info
+                List<QueryResponse.ReportInfo> reportPaths = result.getResults().stream()
+                    .map(row -> {
+                        String recordId = row.get("record_id") != null ? row.get("record_id").toString() : "N/A";
+                        String workId = row.get("work_id") != null ? row.get("work_id").toString() : "N/A";
+                        return new QueryResponse.ReportInfo(recordId, workId);
+                    })
+                    .distinct()
+                    .collect(Collectors.toList());
+                
+                long executionTimeMs = System.currentTimeMillis() - startTime;
+                
+                logger.info("✅ Function calling query successful: {} records found in {}ms", 
+                           result.getResultCount(), executionTimeMs);
+                logger.info("📊 Generated SQL: {}", result.getSqlQuery());
+                
+                QueryRequest queryRequest = new QueryRequest();
+                queryRequest.setQuery(request.getQuery());
+                
+                NaturalLanguageQueryResponse response = new NaturalLanguageQueryResponse(
+                    result.getNaturalLanguageResponse(),
+                    queryRequest,
+                    reportPaths,
+                    1.0, // High confidence for function calling
+                    LocalDateTime.now(),
+                    executionTimeMs
+                );
+                response.setConversationId(conversationId);
+                
+                return ResponseEntity.ok(response);
+                
+            } else {
+                logger.error("❌ Function calling query failed: {}", result.getErrorMessage());
+                
+                QueryRequest errorQueryRequest = new QueryRequest();
+                errorQueryRequest.setQuery(request.getQuery());
+                
+                NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
+                    "I encountered an error while processing your query: " + result.getErrorMessage(),
+                    errorQueryRequest,
+                    List.of(),
+                    0.0,
+                    LocalDateTime.now(),
+                    System.currentTimeMillis() - startTime
+                );
+                errorResponse.setConversationId(conversationId);
+                
+                return ResponseEntity.internalServerError().body(errorResponse);
+            }
+            
+        } catch (Exception e) {
+            logger.error("💥 Exception in function calling query: ", e);
+            
+            QueryRequest exceptionQueryRequest = new QueryRequest();
+            exceptionQueryRequest.setQuery(request.getQuery());
+            
+            NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
+                "I encountered an unexpected error while processing your query. Please try again or contact support.",
+                exceptionQueryRequest,
+                List.of(),
+                0.0,
+                LocalDateTime.now(),
+                System.currentTimeMillis() - startTime
+            );
+            errorResponse.setConversationId(conversationId);
+            
+            return ResponseEntity.internalServerError().body(errorResponse);
+        }
     }
     
     /**
