@@ -5,9 +5,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.context.annotation.Import;
+import com.pmd_failure_bot.config.ApplicationConfig;
 
+/**
+ * Main application class for PMD Failure Bot
+ */
 @SpringBootApplication
 @EnableJpaRepositories(basePackages = "com.pmd_failure_bot.repository")
+@Import(ApplicationConfig.class)
 public class PmdFailureBotApplication {
 
 	private static final Logger logger = LoggerFactory.getLogger(PmdFailureBotApplication.class);
@@ -33,7 +39,6 @@ public class PmdFailureBotApplication {
 		
 		SpringApplication.run(PmdFailureBotApplication.class, args);
 		
-		logger.info("PMD Failure Bot started successfully. Ready to receive Slack messages!");
+		logger.info("PMD Failure Bot started successfully. Ready to receive requests!");
 	}
-
 }

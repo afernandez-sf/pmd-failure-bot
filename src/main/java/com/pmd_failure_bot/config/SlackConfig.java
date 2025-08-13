@@ -14,26 +14,27 @@ public class SlackConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(SlackConfig.class);
 
-    @Value("${slack.bot.token}")
+    @Value("${slack.bot.token:}")
     private String botToken;
 
-    @Value("${slack.app.token}")
+    @Value("${slack.app.token:}")
     private String appToken;
 
-    @Value("${slack.signing.secret}")
+    @Value("${slack.signing.secret:}")
     private String signingSecret;
+
 
     @Bean
     public App slackApp() {
         // Validate configuration
         if (botToken == null || botToken.trim().isEmpty()) {
-            logger.warn("SLACK_BOT_TOKEN is not configured. Slack integration will be disabled.");
-            return createDummyApp();
+            logger.error("SLACK_BOT_TOKEN is not configured. Slack integration will be disabled.");
+            return null;
         }
         
         if (appToken == null || appToken.trim().isEmpty()) {
-            logger.warn("SLACK_APP_TOKEN is not configured. Socket mode will be disabled.");
-            return createDummyApp();
+            logger.error("SLACK_APP_TOKEN is not configured. Slack integration will be disabled.");
+            return null;
         }
 
         try {
@@ -51,7 +52,7 @@ public class SlackConfig {
             
         } catch (Exception e) {
             logger.error("Failed to configure Slack app: ", e);
-            return createDummyApp();
+            return null;
         }
     }
 
@@ -84,17 +85,4 @@ public class SlackConfig {
         }
     }
 
-    private App createDummyApp() {
-        // Create a dummy app for cases where Slack is not properly configured
-        try {
-            AppConfig appConfig = AppConfig.builder()
-                    .singleTeamBotToken("dummy-token")
-                    .signingSecret("dummy-secret")
-                    .build();
-            return new App(appConfig);
-        } catch (Exception e) {
-            logger.error("Failed to create dummy app: ", e);
-            return null;
-        }
-    }
 }

@@ -1,4 +1,4 @@
-package com.pmd_failure_bot.service;
+package com.pmd_failure_bot.infrastructure.salesforce;
 
 import com.pmd_failure_bot.config.SalesforceLlmGatewayConfig;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,6 +17,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
 
+/**
+ * Service for interacting with the Salesforce LLM Gateway
+ */
 @Service
 public class SalesforceLlmGatewayService {
     
@@ -25,11 +28,16 @@ public class SalesforceLlmGatewayService {
     private final SalesforceLlmGatewayConfig config;
     private final ObjectMapper objectMapper = new ObjectMapper();
     
+
+
     @Autowired
     public SalesforceLlmGatewayService(SalesforceLlmGatewayConfig config) {
         this.config = config;
     }
     
+    /**
+     * Generate a text response from the LLM
+     */
     public String generateResponse(String prompt) throws Exception {
         config.validate();
         

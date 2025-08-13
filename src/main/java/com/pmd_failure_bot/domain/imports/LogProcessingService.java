@@ -1,7 +1,8 @@
-package com.pmd_failure_bot.service;
+package com.pmd_failure_bot.domain.imports;
 
 import com.pmd_failure_bot.config.SalesforceConfig;
 import com.pmd_failure_bot.entity.PmdReport;
+import com.pmd_failure_bot.infrastructure.salesforce.SalesforceService;
 import com.pmd_failure_bot.repository.PmdReportRepository;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
@@ -11,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.pmd_failure_bot.domain.analysis.ErrorAnalyzer;
 import java.io.*;
 import java.nio.file.*;
 import java.time.LocalDate;
@@ -21,6 +23,9 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+/**
+ * Service responsible for processing log archives and files
+ */
 @Service
 public class LogProcessingService {
     
@@ -28,21 +33,8 @@ public class LogProcessingService {
     
     private final SalesforceConfig salesforceConfig;
     private final PmdReportRepository pmdReportRepository;
-    
 
-    private static final List<String> ERROR_PATTERNS = Arrays.asList(
-        "\\bERROR\\b",
-        "\\[ERROR\\]",
-        "\\bFATAL\\b",
-        "\\bFAILED\\b",
-        "Refusing to execute",
-        "Unable to get",
-        "Unable to retrieve",
-        "Unable to start",
-        "connection error",
-        "maximum retries reached",
-        "Oracle not available"
-    );
+    // Moved error patterns to ErrorAnalyzer class
     
     @Autowired
     public LogProcessingService(SalesforceConfig salesforceConfig, PmdReportRepository pmdReportRepository) {
@@ -154,8 +146,8 @@ public class LogProcessingService {
     }
     
     private boolean isAttachmentProcessed(String attachmentId) {
-        return pmdReportRepository.findByFiltersWithoutDate(null, null, null, null, attachmentId, 
-                                                null).size() > 0;
+        return !pmdReportRepository.findByFilters(null, null, null, null, attachmentId,
+                null).isEmpty();
     }
     
     private String sanitizeFileName(String fileName) {
@@ -270,7 +262,7 @@ public class LogProcessingService {
         List<String> lines = Files.readAllLines(logFile);
         
         // Extract error context or use full log content
-        String errorContext = extractErrorContext(lines);
+        String errorContext = ErrorAnalyzer.extractErrorContext(lines);
         if (errorContext.isEmpty()) {
             // If no error patterns detected, store the entire log content
             errorContext = String.join("\n", lines);
@@ -321,61 +313,7 @@ public class LogProcessingService {
         return report;
     }
     
-    private String extractErrorContext(List<String> lines) {
-        List<Pattern> errorPatterns = ERROR_PATTERNS.stream()
-            .map(pattern -> Pattern.compile(pattern, Pattern.CASE_INSENSITIVE))
-            .toList();
-        
-        Set<Integer> errorIndices = new HashSet<>();
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i);
-            for (Pattern pattern : errorPatterns) {
-                if (pattern.matcher(line).find()) {
-                    errorIndices.add(i);
-                    break;
-                }
-            }
-        }
-        
-        if (errorIndices.isEmpty()) {
-            return "";
-        }
-        
-        // Create ranges with context
-        List<int[]> ranges = new ArrayList<>();
-        int contextLines = 3;
-        
-        for (int errorIdx : errorIndices.stream().sorted().toList()) {
-            int start = Math.max(0, errorIdx - contextLines);
-            int end = Math.min(lines.size(), errorIdx + contextLines + 1);
-            ranges.add(new int[]{start, end});
-        }
-        
-        // Merge overlapping ranges
-        List<int[]> mergedRanges = new ArrayList<>();
-        for (int[] range : ranges) {
-            if (mergedRanges.isEmpty() || range[0] > mergedRanges.get(mergedRanges.size() - 1)[1]) {
-                mergedRanges.add(range);
-            } else {
-                int[] lastRange = mergedRanges.get(mergedRanges.size() - 1);
-                lastRange[1] = Math.max(lastRange[1], range[1]);
-            }
-        }
-        
-        // Extract lines from merged ranges
-        StringBuilder context = new StringBuilder();
-        for (int i = 0; i < mergedRanges.size(); i++) {
-            if (i > 0) {
-                context.append("\n--- ERROR CONTEXT SEPARATOR ---\n");
-            }
-            int[] range = mergedRanges.get(i);
-            for (int j = range[0]; j < range[1]; j++) {
-                context.append(lines.get(j)).append("\n");
-            }
-        }
-        
-        return context.toString();
-    }
+    // Moved extractErrorContext to ErrorAnalyzer class
     
     private void extractHostnameFromLogContent(PmdReport report, String logContent) {
         // Extract hostname from log content as fallback
@@ -386,8 +324,6 @@ public class LogProcessingService {
             report.setHostname(extractHostnameSuffix(fullHostname));
         }
     }
-    
-
     
     /**
      * Extract hostname suffix (last part after hyphen)

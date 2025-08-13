@@ -1,34 +1,36 @@
-package com.pmd_failure_bot.controller;
+package com.pmd_failure_bot.domain.imports;
 
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;
-import com.pmd_failure_bot.service.LogProcessingService;
-import com.pmd_failure_bot.service.SalesforceService;
+import com.pmd_failure_bot.infrastructure.salesforce.SalesforceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Service for importing logs from Salesforce attachments
+ */
 @Service
-public class QueryController {
+public class LogImportService {
 
     private final SalesforceService salesforceService;
     private final LogProcessingService logProcessingService;
 
     @Autowired
-    public QueryController(SalesforceService salesforceService, 
+    public LogImportService(SalesforceService salesforceService, 
                           LogProcessingService logProcessingService) {
         this.salesforceService = salesforceService;
         this.logProcessingService = logProcessingService;
     }
-
-
     
+    /**
+     * Import logs based on specified criteria
+     */
     public ResponseEntity<LogImportResponse> importLogs(LogImportRequest request) {
         long startTime = System.currentTimeMillis();
         
@@ -163,6 +165,9 @@ public class QueryController {
         }
     }
     
+    /**
+     * Extract step name from the subject field of a Salesforce record
+     */
     private String extractStepNameFromSubject(Map<String, Object> record) {
         String subject = (String) record.get("WorkId_and_Subject__c");
         if (subject != null) {
@@ -180,6 +185,9 @@ public class QueryController {
         return "UNKNOWN_STEP";
     }
     
+    /**
+     * Helper class to store attachment information
+     */
     private static class AttachmentInfo {
         final String attachmentId;
         final String attachmentName;

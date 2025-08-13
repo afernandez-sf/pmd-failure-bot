@@ -1,4 +1,4 @@
-package com.pmd_failure_bot.service;
+package com.pmd_failure_bot.infrastructure.salesforce;
 
 import com.pmd_failure_bot.config.SalesforceConfig;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,12 +10,16 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Service for interacting with Salesforce API
+ */
 @Service
 public class SalesforceService {
     
@@ -27,6 +31,7 @@ public class SalesforceService {
     
     private String sessionId;
     private String instanceUrl;
+    
     
     @Autowired
     public SalesforceService(SalesforceConfig salesforceConfig) {
@@ -161,6 +166,9 @@ public class SalesforceService {
         throw new Exception("All download methods failed for attachment: " + attachmentId, lastException);
     }
     
+    /**
+     * Download attachment using SOQL Body field
+     */
     private byte[] downloadAttachmentByBody(String attachmentId) throws Exception {
         String query = "SELECT Body FROM Attachment WHERE Id = '" + attachmentId + "'";
         List<Map<String, Object>> results = executeQuery(query);
@@ -177,6 +185,9 @@ public class SalesforceService {
         return Base64.getDecoder().decode(bodyData);
     }
     
+    /**
+     * Download attachment using REST API
+     */
     private byte[] downloadAttachmentByRest(String attachmentId) throws Exception {
         String url = instanceUrl + "/services/data/" + salesforceConfig.getApiVersion() + 
                     "/sobjects/Attachment/" + attachmentId + "/Body";
@@ -195,6 +206,9 @@ public class SalesforceService {
         });
     }
     
+    /**
+     * Execute a SOQL query against Salesforce
+     */
     private List<Map<String, Object>> executeQuery(String query) throws Exception {
         String encodedQuery = java.net.URLEncoder.encode(query, "UTF-8");
         String url = instanceUrl + "/services/data/" + salesforceConfig.getApiVersion() + 
@@ -220,8 +234,8 @@ public class SalesforceService {
         if (records != null && records.isArray()) {
             for (JsonNode record : records) {
                 @SuppressWarnings("unchecked")
-            Map<String, Object> recordMap = objectMapper.convertValue(record, Map.class);
-            results.add(recordMap);
+                Map<String, Object> recordMap = objectMapper.convertValue(record, Map.class);
+                results.add(recordMap);
             }
         }
         
@@ -229,6 +243,9 @@ public class SalesforceService {
         return results;
     }
     
+    /**
+     * Ensure that we're logged in, and login if not
+     */
     private void ensureLoggedIn() throws Exception {
         if (sessionId == null || instanceUrl == null) {
             login();

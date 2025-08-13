@@ -1,13 +1,14 @@
-package com.pmd_failure_bot.service;
+package com.pmd_failure_bot.infrastructure.slack;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;
 import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.dto.QueryResponse;
-import com.pmd_failure_bot.service.NaturalLanguageProcessingService;
+import com.pmd_failure_bot.domain.analysis.NaturalLanguageProcessingService;
+import com.pmd_failure_bot.domain.imports.LogImportService;
+import com.pmd_failure_bot.domain.query.DatabaseQueryService;
+import com.pmd_failure_bot.infrastructure.salesforce.SalesforceService;
 import com.slack.api.bolt.App;
 import com.slack.api.bolt.context.builtin.EventContext;
 import com.slack.api.model.event.AppMentionEvent;
@@ -18,15 +19,20 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
+
+/**
+ * Service for Slack messaging and interactions
+ */
 @Service
 public class SlackService {
 
     private static final Logger logger = LoggerFactory.getLogger(SlackService.class);
     private final NaturalLanguageProcessingService nlpService;
-    private final QueryService queryService;
+    private final DatabaseQueryService databaseQueryService;
     private final App slackApp;
     private final SalesforceService salesforceService;
-    private final LogProcessingService logProcessingService;
+    private final LogImportService logImportService;
     
     // Simple cache to prevent duplicate processing of the same message
     private final java.util.Set<String> processedMessages = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -35,16 +41,19 @@ public class SlackService {
     private String botChannelName;
 
     @Autowired
-    public SlackService(NaturalLanguageProcessingService nlpService, QueryService queryService, App slackApp,
-                       SalesforceService salesforceService, LogProcessingService logProcessingService) {
+    public SlackService(NaturalLanguageProcessingService nlpService, DatabaseQueryService databaseQueryService, App slackApp,
+                       SalesforceService salesforceService, LogImportService logImportService) {
         this.nlpService = nlpService;
-        this.queryService = queryService;
+        this.databaseQueryService = databaseQueryService;
         this.slackApp = slackApp;
         this.salesforceService = salesforceService;
-        this.logProcessingService = logProcessingService;
+        this.logImportService = logImportService;
         initializeSlackHandlers();
     }
 
+    /**
+     * Initialize Slack event handlers
+     */
     private void initializeSlackHandlers() {
         // Handle app mentions in channels only
         slackApp.event(AppMentionEvent.class, (payload, ctx) -> {
@@ -53,6 +62,9 @@ public class SlackService {
         });
     }
 
+    /**
+     * Handle application mention events
+     */
     private void handleAppMention(AppMentionEvent event, EventContext ctx) {
         try {
             String text = event.getText();
@@ -92,6 +104,9 @@ public class SlackService {
         }
     }
 
+    /**
+     * Process a query and send a response to Slack
+     */
     private void processQueryAndRespond(String queryText, String channel, Object ctx, String userId, String threadTs) {
         try {
             // Add reaction to show we're processing
@@ -113,9 +128,9 @@ public class SlackService {
                 // Handle import request
                 formattedResponse = processImportRequest(queryRequest, queryText, extractionResult, channel, threadTs);
             } else {
-                // Handle query request
-                QueryResponse response = queryService.processQuery(queryRequest);
-                formattedResponse = formatSlackResponseWithNLP(response, queryText, extractionResult);
+                // Handle query request using DatabaseQueryService directly
+                DatabaseQueryService.DatabaseQueryResult result = databaseQueryService.processNaturalLanguageQuery(queryText);
+                formattedResponse = formatSlackResponseWithResult(result, queryText, extractionResult);
             }
             
             sendMessageInThread(channel, formattedResponse, ctx, threadTs);
@@ -178,7 +193,6 @@ public class SlackService {
                     updateReaction(channelId, messageTs, "eyes", "arrows_counterclockwise");
                     
                     // Perform the actual import
-                    LogImportService logImportService = new LogImportService(salesforceService, logProcessingService);
                     ResponseEntity<LogImportResponse> importResponseEntity = logImportService.importLogs(importRequest);
                     LogImportResponse importResponse = importResponseEntity.getBody();
                     
@@ -187,7 +201,7 @@ public class SlackService {
                     
                     // Send simple completion message in thread
                     String completionMessage = String.format("Successfully imported %d logs for %s", 
-                                                            importResponse.getSuccessfulLogs(), searchCriteria);
+                                                           importResponse.getSuccessfulLogs(), searchCriteria);
                     sendMessageInThread(channelId, completionMessage, null, messageTs);
                     
                 } catch (Exception e) {
@@ -208,8 +222,11 @@ public class SlackService {
         }
     }
 
-    private String formatSlackResponseWithNLP(QueryResponse response, String originalQuery, 
-                                              NaturalLanguageProcessingService.ParameterExtractionResult extractionResult) {
+    /**
+     * Format response for Slack with NLP context
+     */
+    private String formatSlackResponseWithResult(DatabaseQueryService.DatabaseQueryResult result, String originalQuery, 
+                                           NaturalLanguageProcessingService.ParameterExtractionResult extractionResult) {
         StringBuilder sb = new StringBuilder();
         
         // Add confidence indicator if using LLM extraction
@@ -217,20 +234,21 @@ public class SlackService {
             sb.append("🤔 *I'm not completely sure I understood your query correctly.*\n\n");
         }
         
-        // Extract the actual text response from the LLM JSON
-        String analysisText = extractTextFromLlmResponse(response.getLlmResponse());
+        // Get the natural language response from the result
+        String analysisText = result.getNaturalLanguageResponse();
         sb.append(analysisText);
         
-        if (!response.getReports().isEmpty()) {
+        if (result.getResults() != null && !result.getResults().isEmpty()) {
             sb.append("\n\n*Related Work Items:*\n");
-            for (QueryResponse.ReportInfo reportInfo : response.getReports()) {
+            for (Map<String, Object> row : result.getResults()) {
                 // Convert Salesforce record ID to GUS work item URL
-                String gusUrl = "https://gus.lightning.force.com/lightning/r/ADM_Work__c/" + reportInfo.getPath() + "/view";
+                String recordId = row.get("record_id") != null ? row.get("record_id").toString() : "N/A";
+                String workId = row.get("work_id") != null ? row.get("work_id").toString() : "N/A";
+                
+                String gusUrl = "https://gus.lightning.force.com/lightning/r/ADM_Work__c/" + recordId + "/view";
                 
                 // Use work ID as display text if available, otherwise fall back to record ID
-                String displayText = reportInfo.getWorkId() != null && !reportInfo.getWorkId().equals("N/A") 
-                    ? reportInfo.getWorkId() 
-                    : reportInfo.getPath();
+                String displayText = !workId.equals("N/A") ? workId : recordId;
                 
                 // Format as Slack clickable link: <url|text>
                 sb.append("• <").append(gusUrl).append("|").append(displayText).append(">\n");
@@ -272,9 +290,14 @@ public class SlackService {
         return sb.toString();
     }
     
-    // Legacy formatSlackResponse method removed - now using formatSlackResponseWithNLP
-    
+    /**
+     * Send a message in a thread
+     */
     private void sendMessageInThread(String channel, String message, Object ctx, String threadTs) {
+        if (message == null || message.trim().isEmpty()) {
+            return;
+        }
+        
         try {
             if (ctx instanceof EventContext) {
                 ((EventContext) ctx).client().chatPostMessage(r -> {
@@ -299,6 +322,9 @@ public class SlackService {
         }
     }
     
+    /**
+     * Add a reaction to a message
+     */
     private void addReaction(String channel, String timestamp, String reaction, Object ctx) {
         try {
             if (ctx instanceof EventContext) {
@@ -320,6 +346,9 @@ public class SlackService {
         }
     }
     
+    /**
+     * Remove a reaction from a message
+     */
     private void removeReaction(String channel, String timestamp, String reaction, Object ctx) {
         try {
             logger.info("Removing reaction '{}' from message {} in channel {}", reaction, timestamp, channel);
@@ -354,7 +383,6 @@ public class SlackService {
     
     /**
      * Extract the actual text response from the LLM Gateway response
-     * Note: SalesforceLlmGatewayService already extracts text from JSON, so this is plain text
      */
     private String extractTextFromLlmResponse(String llmResponse) {
         // The SalesforceLlmGatewayService already handles JSON parsing and returns plain text
@@ -364,6 +392,9 @@ public class SlackService {
         return llmResponse;
     }
 
+    /**
+     * Update a reaction on a message
+     */
     private void updateReaction(String channel, String timestamp, String oldEmoji, String newEmoji) {
         try {
             // Remove the old reaction first
@@ -382,6 +413,9 @@ public class SlackService {
         }
     }
 
+    /**
+     * Send a simple message to a channel
+     */
     private void sendMessage(String channel, String message) {
         try {
             slackApp.client().chatPostMessage(r -> r
