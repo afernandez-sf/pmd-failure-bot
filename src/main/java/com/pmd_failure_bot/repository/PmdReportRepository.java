@@ -27,4 +27,6 @@ public interface PmdReportRepository extends JpaRepository<PmdReport, Long> {
             @Param("attachmentId") String attachmentId,
             @Param("hostname") String hostname
     );
+
+    List<PmdReport> findByAttachmentIdIn(List<String> attachmentIds);
 }

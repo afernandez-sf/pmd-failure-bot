@@ -3,14 +3,22 @@ package com.pmd_failure_bot.domain.imports;
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;
 import com.pmd_failure_bot.infrastructure.salesforce.SalesforceService;
+import com.pmd_failure_bot.repository.PmdReportRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 /**
  * Service for importing logs from Salesforce attachments
@@ -20,12 +28,15 @@ public class LogImportService {
 
     private final SalesforceService salesforceService;
     private final LogProcessingService logProcessingService;
+    private final PmdReportRepository pmdReportRepository;
 
     @Autowired
     public LogImportService(SalesforceService salesforceService, 
-                          LogProcessingService logProcessingService) {
+                          LogProcessingService logProcessingService,
+                          PmdReportRepository pmdReportRepository) {
         this.salesforceService = salesforceService;
         this.logProcessingService = logProcessingService;
+        this.pmdReportRepository = pmdReportRepository;
     }
     
     /**
@@ -95,46 +106,102 @@ public class LogImportService {
                 }
             }
             
-            // Process attachments
+            // Pre-compute already processed attachments to skip early
+            List<String> attachmentIds = attachments.stream()
+                .map(a -> a.attachmentId)
+                .collect(Collectors.toList());
+            Set<String> alreadyProcessedIds = new HashSet<>(
+                pmdReportRepository.findByAttachmentIdIn(attachmentIds).stream()
+                    .map(r -> r.getAttachmentId())
+                    .collect(Collectors.toSet())
+            );
+
             List<LogImportResponse.ProcessedRecord> processedRecords = new ArrayList<>();
             int totalAttachments = attachments.size();
             int processedAttachments = 0;
             int skippedAttachments = 0;
             int successfulLogs = 0;
             int failedLogs = 0;
-            
+
+            // Add skipped records immediately
+            List<AttachmentInfo> attachmentsToProcess = new ArrayList<>();
             for (AttachmentInfo attachment : attachments) {
-                LogProcessingService.ProcessingResult result = logProcessingService.processAttachment(
-                    attachment.attachmentId,
-                    attachment.attachmentName,
-                    attachment.recordId,
-                    attachment.stepName,
-                    attachment.salesforceMetadata,
-                    salesforceService
-                );
-                
-                LogImportResponse.ProcessedRecord processedRecord = new LogImportResponse.ProcessedRecord(
-                    result.attachmentId,
-                    result.attachmentName,
-                    result.recordId,
-                    (String) attachment.salesforceMetadata.get("work_id"),
-                    (Integer) attachment.salesforceMetadata.get("case_number"),
-                    result.stepName,
-                    result.logsProcessed,
-                    result.status,
-                    result.message
-                );
-                processedRecords.add(processedRecord);
-                
-                if ("SKIPPED".equals(result.status)) {
+                if (alreadyProcessedIds.contains(attachment.attachmentId)) {
                     skippedAttachments++;
+                    processedRecords.add(new LogImportResponse.ProcessedRecord(
+                        attachment.attachmentId,
+                        attachment.attachmentName,
+                        attachment.recordId,
+                        (String) attachment.salesforceMetadata.get("work_id"),
+                        (Integer) attachment.salesforceMetadata.get("case_number"),
+                        attachment.stepName,
+                        0,
+                        "SKIPPED",
+                        "Attachment already processed"
+                    ));
                 } else {
-                    processedAttachments++;
+                    attachmentsToProcess.add(attachment);
                 }
-                
-                successfulLogs += result.logsProcessed;
-                failedLogs += result.logsFailed;
             }
+
+            // Process remaining attachments in parallel
+            int parallelism = Math.max(2, Math.min(8, Runtime.getRuntime().availableProcessors()));
+            ExecutorService executor = Executors.newFixedThreadPool(parallelism);
+            List<Future<LogProcessingService.ProcessingResult>> futures = new ArrayList<>();
+
+            for (AttachmentInfo attachment : attachmentsToProcess) {
+                Callable<LogProcessingService.ProcessingResult> task = () ->
+                    logProcessingService.processAttachment(
+                        attachment.attachmentId,
+                        attachment.attachmentName,
+                        attachment.recordId,
+                        attachment.stepName,
+                        attachment.salesforceMetadata,
+                        salesforceService
+                    );
+                futures.add(executor.submit(task));
+            }
+
+            for (int i = 0; i < attachmentsToProcess.size(); i++) {
+                AttachmentInfo attachment = attachmentsToProcess.get(i);
+                try {
+                    LogProcessingService.ProcessingResult result = futures.get(i).get();
+                    processedRecords.add(new LogImportResponse.ProcessedRecord(
+                        result.attachmentId,
+                        result.attachmentName,
+                        result.recordId,
+                        (String) attachment.salesforceMetadata.get("work_id"),
+                        (Integer) attachment.salesforceMetadata.get("case_number"),
+                        result.stepName,
+                        result.logsProcessed,
+                        result.status,
+                        result.message
+                    ));
+
+                    if ("SKIPPED".equals(result.status)) {
+                        skippedAttachments++;
+                    } else {
+                        processedAttachments++;
+                    }
+                    successfulLogs += result.logsProcessed;
+                    failedLogs += result.logsFailed;
+                } catch (Exception e) {
+                    processedRecords.add(new LogImportResponse.ProcessedRecord(
+                        attachment.attachmentId,
+                        attachment.attachmentName,
+                        attachment.recordId,
+                        (String) attachment.salesforceMetadata.get("work_id"),
+                        (Integer) attachment.salesforceMetadata.get("case_number"),
+                        attachment.stepName,
+                        0,
+                        "FAILED",
+                        "Processing error: " + e.getMessage()
+                    ));
+                    failedLogs++;
+                }
+            }
+
+            executor.shutdown();
             
             long executionTime = System.currentTimeMillis() - startTime;
             String message = String.format(

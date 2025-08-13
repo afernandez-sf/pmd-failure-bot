@@ -10,7 +10,6 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -100,15 +99,15 @@ public class SalesforceService {
             throw new IllegalArgumentException("Invalid step name: " + stepName);
         }
         
-        String query = String.format("""
-            SELECT Id, WorkId_and_Subject__c,
-            (
-                SELECT Id, Name, BodyLength, ContentType, LastModifiedDate
-                FROM Attachments
-            )
-            FROM ADM_Work__c 
-            WHERE Subject__c LIKE 'Step: %s%%Status: FAILED%%'
-            """, stepName);
+		String query = String.format("""
+			SELECT Id, WorkId_and_Subject__c,
+			(
+				SELECT Id, Name, BodyLength, ContentType, LastModifiedDate
+				FROM Attachments
+			)
+			FROM ADM_Work__c 
+			WHERE Subject__c LIKE 'Step: %s%%Status: FAILED%%'
+			""", stepName);
         
         logger.info("Querying failed step: {}", stepName);
         return executeQuery(query);
@@ -124,15 +123,15 @@ public class SalesforceService {
             throw new IllegalArgumentException("Invalid case number: " + caseNumber);
         }
         
-        String query = String.format("""
-            SELECT Id, WorkId_and_Subject__c,
-            (
-                SELECT Id, Name, BodyLength, ContentType, LastModifiedDate
-                FROM Attachments
-            )
-            FROM ADM_Work__c 
-            WHERE WorkId_and_Subject__c LIKE '%%Status: FAILED%%Case: %d%%'
-            """, caseNumber);
+		String query = String.format("""
+			SELECT Id, WorkId_and_Subject__c,
+			(
+				SELECT Id, Name, BodyLength, ContentType, LastModifiedDate
+				FROM Attachments
+			)
+			FROM ADM_Work__c 
+			WHERE WorkId_and_Subject__c LIKE '%%Status: FAILED%%Case: %d%%'
+			""", caseNumber);
 
         logger.info("Querying failed attachments for case: {}", caseNumber);
         return executeQuery(query);
@@ -144,46 +143,11 @@ public class SalesforceService {
     public byte[] downloadAttachment(String attachmentId) throws Exception {
         ensureLoggedIn();
         
-        // Try multiple methods to download attachment
-        Exception lastException = null;
-        
-        // Method 1: Query Body field
-        try {
-            return downloadAttachmentByBody(attachmentId);
-        } catch (Exception e) {
-            lastException = e;
-            logger.warn("Failed to download attachment using Body field: {}", e.getMessage());
-        }
-        
-        // Method 2: REST API
-        try {
-            return downloadAttachmentByRest(attachmentId);
-        } catch (Exception e) {
-            lastException = e;
-            logger.warn("Failed to download attachment using REST API: {}", e.getMessage());
-        }
-        
-        throw new Exception("All download methods failed for attachment: " + attachmentId, lastException);
+        // Always use REST blob retrieval for attachments
+        return downloadAttachmentByRest(attachmentId);
     }
     
-    /**
-     * Download attachment using SOQL Body field
-     */
-    private byte[] downloadAttachmentByBody(String attachmentId) throws Exception {
-        String query = "SELECT Body FROM Attachment WHERE Id = '" + attachmentId + "'";
-        List<Map<String, Object>> results = executeQuery(query);
-        
-        if (results.isEmpty()) {
-            throw new Exception("Attachment not found: " + attachmentId);
-        }
-        
-        String bodyData = (String) results.get(0).get("Body");
-        if (bodyData == null || bodyData.startsWith("/services/data/")) {
-            throw new Exception("Body field contains URL reference, not data");
-        }
-        
-        return Base64.getDecoder().decode(bodyData);
-    }
+    
     
     /**
      * Download attachment using REST API
