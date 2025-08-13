@@ -49,6 +49,11 @@ public class DatabaseQueryService {
                 // Validate and execute the SQL
                 if (isValidReadOnlyQuery(sql)) {
                     List<Map<String, Object>> results = jdbcTemplate.queryForList(sql);
+
+                    // Remove internal 'id' field from results if present
+                    for (Map<String, Object> row : results) {
+                        row.remove("id");
+                    }
                     
                     // Now call LLM again to generate a natural language response
                     String naturalLanguageResponse = generateNaturalLanguageResponse(userQuery, sql, results);
@@ -88,12 +93,13 @@ public class DatabaseQueryService {
         Map<String, Object> sqlQuery = new HashMap<>();
         sqlQuery.put("type", "string");
         sqlQuery.put("description", "A valid PostgreSQL SELECT query to search the pmd_failure_logs table. " +
-                                   "Available columns: id, record_id, work_id, case_number, step_name, attachment_id, hostname, content (TEXT), report_date. " +
+                                   "Available columns: record_id, work_id, case_number, step_name, attachment_id, hostname, content (TEXT), report_date. " +
+                                   "Do NOT select the internal 'id' column in results. " +
                                    "IMPORTANT: For step_name searches, always use ILIKE with % wildcards since step names have pod suffixes (e.g., 'STOP_APPS_NA123'). " +
                                    "Example: WHERE step_name ILIKE '%STOP_APPS%' or WHERE step_name ILIKE '%SSH_TO_ALL_HOSTS%'. " +
                                    "For date filtering use: report_date = 'YYYY-MM-DD' or report_date >= 'YYYY-MM-DD'. " +
                                    "Common step prefixes: GRIDFORCE_APP_LOG_COPY, SSH_TO_ALL_HOSTS, SETUP_BROKER_NEW_PRI, DB_POST_VALIDATION, STOP_APPS. " +
-                                   "Always use LIMIT to avoid returning too many results (max 50).");
+                                   "Always use LIMIT to avoid returning too many results (max 20).");
         
         properties.put("sql_query", sqlQuery);
         parameters.put("properties", properties);
