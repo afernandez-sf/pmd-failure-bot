@@ -4,35 +4,33 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Controller providing MCP API metadata endpoints like health and help
+ * Controller providing API metadata endpoints like health and help
  */
 @RestController
-@RequestMapping("/api/mcp")
-public class McpApiController {
+@RequestMapping("/api")
+public class ApiController {
     
-    // Logger not used; remove to keep file minimal
-
     /**
-     * Health check endpoint for MCP tool availability
+     * Health check endpoint for tool availability
      */
     @GetMapping("/health")
     public ResponseEntity<String> health() {
-        return ResponseEntity.ok("MCP Natural Language Query Tool is operational");
+        return ResponseEntity.ok("Natural Language Query Tool is operational");
     }
     
     /**
      * Get information about supported query patterns and examples
      */
     @GetMapping("/help")
-    public ResponseEntity<MCPHelpResponse> getHelp() {
-        MCPHelpResponse help = new MCPHelpResponse();
+    public ResponseEntity<HelpResponse> getHelp() {
+        HelpResponse help = new HelpResponse();
         return ResponseEntity.ok(help);
     }
     
     /**
-     * Help response for the MCP tool
+     * Help response for the tool
      */
-    public static class MCPHelpResponse {
+    public static class HelpResponse {
         private final String description = "Natural Language Query Tool for PMD Failure Logs";
         private final String[] supportedParameters = {
             "case_number: Support case numbers (e.g., 'case 123456')",

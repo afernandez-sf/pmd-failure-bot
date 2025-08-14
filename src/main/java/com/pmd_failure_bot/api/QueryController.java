@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
  * Controller for natural language query processing
  */
 @RestController
-@RequestMapping("/api/mcp/query")
+@RequestMapping("/api/query")
 public class QueryController {
     
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
@@ -40,8 +40,8 @@ public class QueryController {
     }
     
     /**
-     * MCP Tool endpoint for natural language PMD log queries
-     * This endpoint provides the core MCP functionality for conversational log analysis
+     * Tool endpoint for natural language PMD log queries
+     * This endpoint provides the core functionality for conversational log analysis
      */
     @PostMapping
     public ResponseEntity<NaturalLanguageQueryResponse> processNaturalLanguageQuery(

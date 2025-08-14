@@ -23,7 +23,7 @@ import java.util.UUID;
  * Controller for log import operations
  */
 @RestController
-@RequestMapping("/api/mcp/import")
+@RequestMapping("/api/import")
 public class ImportController {
     
     private static final Logger logger = LoggerFactory.getLogger(ImportController.class);
