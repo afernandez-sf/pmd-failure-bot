@@ -21,7 +21,7 @@ public class PromptTemplates {
               .append("- case_number: Support case number (integers only, if mentioned)\n")
               .append("- step_name: Deployment step name (if mentioned - examples: SSH_TO_ALL_HOSTS, GRIDFORCE_APP_LOG_COPY, KM_VALIDATION_RELENG, CREATE_IR_ORGS_TABLE_PRESTO_TGT)\n")
               .append("- attachment_id: Salesforce attachment ID (if mentioned)\n")
-              .append("- hostname: Target hostname or server name (if mentioned)\n")
+              .append("- datacenter: Target datacenter or host suffix (if mentioned)\n")
               .append("- report_date: Date in YYYY-MM-DD format (if mentioned, including relative dates like \"yesterday\", \"last week\")\n")
               .append("- query: The refined natural language question to ask about the logs\n")
               .append("- intent: Either 'query' (asking questions about logs) or 'import' (requesting to import/fetch/pull logs)\n")
@@ -37,9 +37,9 @@ public class PromptTemplates {
               .append("8. If no parameters are found, return null for those fields\n")
               .append("9. Return ONLY valid JSON, no other text\n\n")
               .append("Example query: \"What went wrong with case 123456's SSH deployment yesterday?\"\n")
-              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"hostname\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"query\", \"confidence\": 0.9}\n\n")
+              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"datacenter\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"query\", \"confidence\": 0.9}\n\n")
               .append("Example import: \"Import logs for case 567890\"\n")
-              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 567890, \"step_name\": null, \"attachment_id\": null, \"hostname\": null, \"report_date\": null, \"query\": \"Import logs\", \"intent\": \"import\", \"confidence\": 0.95}\n")
+              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 567890, \"step_name\": null, \"attachment_id\": null, \"datacenter\": null, \"report_date\": null, \"query\": \"Import logs\", \"intent\": \"import\", \"confidence\": 0.95}\n")
               .append("</instructions>\n\n");
 
         if (conversationContext != null && !conversationContext.trim().isEmpty()) {

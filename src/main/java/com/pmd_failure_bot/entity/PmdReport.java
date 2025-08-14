@@ -26,8 +26,8 @@ public class PmdReport {
     @Column(name = "attachment_id")
     private String attachmentId;
     
-    @Column(name = "hostname")
-    private String hostname;
+    @Column(name = "datacenter")
+    private String datacenter;
     
     @Column(name = "content", columnDefinition = "TEXT")
     private String content;
@@ -83,12 +83,12 @@ public class PmdReport {
         this.attachmentId = attachmentId;
     }
 
-    public String getHostname() {
-        return hostname;
+    public String getDatacenter() {
+        return datacenter;
     }
 
-    public void setHostname(String hostname) {
-        this.hostname = hostname;
+    public void setDatacenter(String datacenter) {
+        this.datacenter = datacenter;
     }
 
     public String getContent() {

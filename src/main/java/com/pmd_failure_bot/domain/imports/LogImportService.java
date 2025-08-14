@@ -7,6 +7,7 @@ import com.pmd_failure_bot.repository.PmdReportRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import com.pmd_failure_bot.util.StepNameNormalizer;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,14 +30,17 @@ public class LogImportService {
     private final SalesforceService salesforceService;
     private final LogProcessingService logProcessingService;
     private final PmdReportRepository pmdReportRepository;
+    private final StepNameNormalizer stepNameNormalizer;
 
     @Autowired
     public LogImportService(SalesforceService salesforceService, 
                           LogProcessingService logProcessingService,
-                          PmdReportRepository pmdReportRepository) {
+                          PmdReportRepository pmdReportRepository,
+                          StepNameNormalizer stepNameNormalizer) {
         this.salesforceService = salesforceService;
         this.logProcessingService = logProcessingService;
         this.pmdReportRepository = pmdReportRepository;
+        this.stepNameNormalizer = stepNameNormalizer;
     }
     
     /**
@@ -89,6 +93,9 @@ public class LogImportService {
                         for (Map<String, Object> attachment : attachmentRecords) {
                             String stepName = request.getStepName() != null ? 
                                 request.getStepName() : extractStepNameFromSubject(record);
+                            if (stepName != null) {
+                                stepName = stepNameNormalizer.normalize(stepName);
+                            }
                             
                             // Combine Salesforce record metadata with attachment-specific metadata
                             Map<String, Object> combinedMetadata = new HashMap<>(salesforceMetadata);

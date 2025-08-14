@@ -2,7 +2,6 @@ package com.pmd_failure_bot.domain.query;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pmd_failure_bot.domain.analysis.ErrorAnalyzer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -88,7 +87,7 @@ public class DatabaseQueryService {
         Map<String, Object> function = new HashMap<>();
         function.put("name", "query_pmd_logs");
         function.put("description", "Query the PMD failure logs database to find information about deployment failures, errors, and issues. " +
-                                   "The database contains logs from various deployment steps with details about failures, timestamps, hostnames, and error content.");
+                                   "The database contains logs from various deployment steps with details about failures, timestamps, datacenters, and error content.");
         
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("type", "object");
@@ -98,12 +97,12 @@ public class DatabaseQueryService {
         Map<String, Object> sqlQuery = new HashMap<>();
         sqlQuery.put("type", "string");
         sqlQuery.put("description", "A valid PostgreSQL SELECT query to search the pmd_failure_logs table. " +
-                                   "Available columns: record_id, work_id, case_number, step_name, attachment_id, hostname, content (TEXT), report_date. " +
+                                   "Available columns: record_id, work_id, case_number, step_name, attachment_id, datacenter, content (TEXT), report_date. " +
                                    "Do NOT select the internal 'id' column in results. " +
-                                   "IMPORTANT: For step_name searches, always use ILIKE with % wildcards since step names have pod suffixes (e.g., 'STOP_APPS_NA123'). " +
-                                   "Example: WHERE step_name ILIKE '%STOP_APPS%' or WHERE step_name ILIKE '%SSH_TO_ALL_HOSTS%'. " +
+                                   "IMPORTANT: step_name is stored as a canonical name (no pod suffix). " +
+                                   "Example filters: WHERE step_name = 'STOP_APPS' or WHERE step_name IN ('SSH_TO_ALL_HOSTS','GRIDFORCE_APP_LOG_COPY'). " +
                                    "For date filtering use: report_date = 'YYYY-MM-DD' or report_date >= 'YYYY-MM-DD'. " +
-                                   "Common step prefixes: GRIDFORCE_APP_LOG_COPY, SSH_TO_ALL_HOSTS, SETUP_BROKER_NEW_PRI, DB_POST_VALIDATION, STOP_APPS. " +
+                                   "Common step names: GRIDFORCE_APP_LOG_COPY, SSH_TO_ALL_HOSTS, SETUP_BROKER_NEW_PRI, DB_POST_VALIDATION, STOP_APPS. " +
                                    "Always use LIMIT to avoid returning too many results (max 20).");
         
         properties.put("sql_query", sqlQuery);

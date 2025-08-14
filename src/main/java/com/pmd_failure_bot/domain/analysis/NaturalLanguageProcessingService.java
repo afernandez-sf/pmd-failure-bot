@@ -11,12 +11,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import com.pmd_failure_bot.infrastructure.ai.AIService;
 import com.pmd_failure_bot.infrastructure.ai.PromptTemplates;
 import org.springframework.stereotype.Service;
+import com.pmd_failure_bot.util.StepNameNormalizer;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Service for natural language processing and parameter extraction
@@ -28,12 +26,14 @@ public class NaturalLanguageProcessingService {
     
     private final AIService aiService;
     private final PromptTemplates promptTemplates;
+    private final StepNameNormalizer stepNameNormalizer;
     private final ObjectMapper objectMapper = new ObjectMapper();
     
     @Autowired
-    public NaturalLanguageProcessingService(AIService aiService, PromptTemplates promptTemplates) {
+    public NaturalLanguageProcessingService(AIService aiService, PromptTemplates promptTemplates, StepNameNormalizer stepNameNormalizer) {
         this.aiService = aiService;
         this.promptTemplates = promptTemplates;
+        this.stepNameNormalizer = stepNameNormalizer;
     }
     
     /**
@@ -52,8 +52,7 @@ public class NaturalLanguageProcessingService {
             
         } catch (Exception e) {
             logger.error("Error extracting parameters from query: {}", naturalLanguageQuery, e);
-            // Fallback to regex-based extraction
-            return fallbackParameterExtraction(naturalLanguageQuery);
+            return new ParameterExtractionResult(new QueryRequest(), 0.0, "LLM_ERROR");
         }
     }
     
@@ -91,7 +90,8 @@ public class NaturalLanguageProcessingService {
             }
             
             if (responseNode.has("step_name") && !responseNode.get("step_name").isNull()) {
-                queryRequest.setStepName(responseNode.get("step_name").asText());
+                String normalized = stepNameNormalizer.normalize(responseNode.get("step_name").asText());
+                queryRequest.setStepName(normalized);
             }
             
             if (responseNode.has("attachment_id") && !responseNode.get("attachment_id").isNull()) {
@@ -99,7 +99,7 @@ public class NaturalLanguageProcessingService {
             }
             
             if (responseNode.has("hostname") && !responseNode.get("hostname").isNull()) {
-                queryRequest.setHostname(responseNode.get("hostname").asText());
+                queryRequest.setDatacenter(responseNode.get("hostname").asText());
             }
             
             if (responseNode.has("report_date") && !responseNode.get("report_date").isNull()) {
@@ -130,108 +130,19 @@ public class NaturalLanguageProcessingService {
             
         } catch (JsonProcessingException e) {
             logger.error("Failed to parse LLM response as JSON: {}", llmResponse, e);
-            return fallbackParameterExtraction(originalQuery);
+            return new ParameterExtractionResult(new QueryRequest(), 0.0, "LLM_PARSE_ERROR");
         }
     }
     
     
-    /**
-     * Fallback parameter extraction using regex patterns
-     */
-    private ParameterExtractionResult fallbackParameterExtraction(String text) {
-        QueryRequest request = new QueryRequest();
-        String originalText = text;
-        
-        // Pattern for case number: case_number:123456, case:123456, case 123456
-        Pattern casePattern = Pattern.compile("(?:case[_\\s]*(?:number)?[:\\s=]?)(\\d+)", Pattern.CASE_INSENSITIVE);
-        Matcher caseMatcher = casePattern.matcher(text);
-        if (caseMatcher.find()) {
-            request.setCaseNumber(Integer.parseInt(caseMatcher.group(1)));
-            text = text.replaceAll(casePattern.pattern(), "").trim();
-        }
-        
-        // Pattern for step name: step:stepname, step=stepname
-        Pattern stepPattern = Pattern.compile("(?:step[:\\s=])([\\w_-]+)", Pattern.CASE_INSENSITIVE);
-        Matcher stepMatcher = stepPattern.matcher(text);
-        if (stepMatcher.find()) {
-            request.setStepName(mapStepNameVariations(stepMatcher.group(1)));
-            text = text.replaceAll(stepPattern.pattern(), "").trim();
-        }
-        
-        // Pattern for hostname: host:hostname, server:hostname
-        Pattern hostPattern = Pattern.compile("(?:(?:host|server)[:\\s=])([^\\s]+)", Pattern.CASE_INSENSITIVE);
-        Matcher hostMatcher = hostPattern.matcher(text);
-        if (hostMatcher.find()) {
-            request.setHostname(hostMatcher.group(1));
-            text = text.replaceAll(hostPattern.pattern(), "").trim();
-        }
-        
-        // Pattern for date: date:2024-01-01, yesterday, today
-        text = extractDateFromText(text, request);
-        
-        // The remaining text is the query
-        request.setQuery(text.trim().isEmpty() ? originalText : text.trim());
-        
-        return new ParameterExtractionResult(request, 0.6, "REGEX_FALLBACK");
-    }
+    // Removed regex fallback extraction to avoid heuristic parsing
     
-    /**
-     * Maps step name variations to known patterns
-     */
-    private String mapStepNameVariations(String stepName) {
-        String upperStep = stepName.toUpperCase();
-        
-        Map<String, String> stepMappings = Map.of(
-            "SSH", "SSH_TO_ALL_HOSTS",
-            "GRIDFORCE", "GRIDFORCE_APP_LOG_COPY", 
-            "KM", "KM_VALIDATION_RELENG",
-            "CREATE_IR", "CREATE_IR_ORGS_TABLE_PRESTO_TGT"
-        );
-        
-        for (Map.Entry<String, String> entry : stepMappings.entrySet()) {
-            if (upperStep.contains(entry.getKey())) {
-                return entry.getValue();
-            }
-        }
-        
-        return stepName;
-    }
+    // Removed heuristic mapping of step name variations
     
     /**
      * Extracts date from text including relative dates
      */
-    private String extractDateFromText(String text, QueryRequest request) {
-        // Absolute date pattern
-        Pattern datePattern = Pattern.compile("(?:date[:\\s=])?(\\d{4}-\\d{2}-\\d{2})", Pattern.CASE_INSENSITIVE);
-        Matcher dateMatcher = datePattern.matcher(text);
-        if (dateMatcher.find()) {
-            try {
-                request.setReportDate(LocalDate.parse(dateMatcher.group(1)));
-                return text.replaceAll(datePattern.pattern(), "").trim();
-            } catch (DateTimeParseException e) {
-                logger.warn("Invalid date format: {}", dateMatcher.group(1));
-            }
-        }
-        
-        // Relative date patterns
-        LocalDate today = LocalDate.now();
-        if (text.toLowerCase().contains("yesterday")) {
-            request.setReportDate(today.minusDays(1));
-            return text.replaceAll("(?i)yesterday", "").trim();
-        }
-        
-        if (text.toLowerCase().contains("today")) {
-            request.setReportDate(today);
-            return text.replaceAll("(?i)today", "").trim();
-        }
-        
-        if (text.toLowerCase().contains("last week")) {
-            request.setReportDate(today.minusWeeks(1));
-            return text.replaceAll("(?i)last week", "").trim();
-        }
-        
-        return text;
-    }
+    // Removed heuristic date extraction
     
     /**
      * Result class for parameter extraction

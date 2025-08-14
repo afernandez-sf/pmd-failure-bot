@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import com.pmd_failure_bot.util.StepNameNormalizer;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -26,6 +27,7 @@ public class SalesforceService {
     
     private final SalesforceConfig salesforceConfig;
     private final ObjectMapper objectMapper;
+    private final StepNameNormalizer stepNameNormalizer;
     private final CloseableHttpClient httpClient;
     
     private String sessionId;
@@ -33,10 +35,11 @@ public class SalesforceService {
     
     
     @Autowired
-    public SalesforceService(SalesforceConfig salesforceConfig) {
+    public SalesforceService(SalesforceConfig salesforceConfig, StepNameNormalizer stepNameNormalizer) {
         this.salesforceConfig = salesforceConfig;
         this.objectMapper = new ObjectMapper();
         this.httpClient = HttpClients.createDefault();
+        this.stepNameNormalizer = stepNameNormalizer;
     }
     
     /**
@@ -243,11 +246,13 @@ public class SalesforceService {
                 metadata.put("case_number", Integer.parseInt(caseMatcher.group(1)));
             }
             if (stepMatcher.find()) {
-                metadata.put("step_name", stepMatcher.group(1)); // Store step name exactly as shown
+                String rawStep = stepMatcher.group(1);
+                String normalized = stepNameNormalizer.normalize(rawStep);
+                metadata.put("step_name", normalized);
             }
             if (hostMatcher.find()) {
                 String hostnameSuffix = hostMatcher.group(2); // Extract just the suffix (e.g., "am3")
-                metadata.put("hostname", hostnameSuffix);
+                metadata.put("hostname", hostnameSuffix); // keep key for compatibility; mapped to datacenter at save
             }
         }
         

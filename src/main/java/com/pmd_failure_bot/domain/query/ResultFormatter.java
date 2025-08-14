@@ -43,7 +43,7 @@ public class ResultFormatter {
             String stepName = getFieldValue(row, "step_name");
             String caseNumber = getFieldValue(row, "case_number");
             String date = getFieldValue(row, "report_date");
-            String hostname = getFieldValue(row, "hostname");
+            String hostname = getFieldValue(row, "datacenter");
             
             rowSection.append(String.format("## %s | Case %s | %s | %s\n", 
                                           stepName, caseNumber, date, hostname));

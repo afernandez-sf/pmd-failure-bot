@@ -1,10 +1,8 @@
 package com.pmd_failure_bot.infrastructure.slack;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;
 import com.pmd_failure_bot.dto.QueryRequest;
-import com.pmd_failure_bot.dto.QueryResponse;
 import com.pmd_failure_bot.domain.analysis.NaturalLanguageProcessingService;
 import com.pmd_failure_bot.domain.imports.LogImportService;
 import com.pmd_failure_bot.domain.query.DatabaseQueryService;
@@ -117,9 +115,9 @@ public class SlackService {
                 nlpService.extractParameters(queryText, null);
             
             QueryRequest queryRequest = extractionResult.getQueryRequest();
-            logger.info("NLP extracted parameters - Case: {}, Step: {}, Host: {}, Date: {}, Intent: {}, Confidence: {} (Method: {})", 
+            logger.info("NLP extracted parameters - Case: {}, Step: {}, Datacenter: {}, Date: {}, Intent: {}, Confidence: {} (Method: {})", 
                        queryRequest.getCaseNumber(), queryRequest.getStepName(), 
-                       queryRequest.getHostname(), queryRequest.getReportDate(),
+                       queryRequest.getDatacenter(), queryRequest.getReportDate(),
                        extractionResult.getIntent(), extractionResult.getConfidence(), extractionResult.getExtractionMethod());
             
             String formattedResponse;
@@ -270,9 +268,9 @@ public class SlackService {
                 sb.append("step ").append(params.getStepName());
                 hasParams = true;
             }
-            if (params.getHostname() != null) {
+            if (params.getDatacenter() != null) {
                 if (hasParams) sb.append(", ");
-                sb.append("host ").append(params.getHostname());
+                sb.append("datacenter ").append(params.getDatacenter());
                 hasParams = true;
             }
             if (params.getReportDate() != null) {

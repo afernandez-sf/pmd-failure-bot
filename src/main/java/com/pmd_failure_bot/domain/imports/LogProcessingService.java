@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import com.pmd_failure_bot.util.StepNameNormalizer;
 
 import com.pmd_failure_bot.domain.analysis.ErrorAnalyzer;
 import java.io.*;
@@ -18,8 +19,6 @@ import java.nio.file.*;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -33,13 +32,15 @@ public class LogProcessingService {
     
     private final SalesforceConfig salesforceConfig;
     private final PmdReportRepository pmdReportRepository;
+    private final StepNameNormalizer stepNameNormalizer;
 
     // Moved error patterns to ErrorAnalyzer class
     
     @Autowired
-    public LogProcessingService(SalesforceConfig salesforceConfig, PmdReportRepository pmdReportRepository) {
+    public LogProcessingService(SalesforceConfig salesforceConfig, PmdReportRepository pmdReportRepository, StepNameNormalizer stepNameNormalizer) {
         this.salesforceConfig = salesforceConfig;
         this.pmdReportRepository = pmdReportRepository;
+        this.stepNameNormalizer = stepNameNormalizer;
     }
     
     /**
@@ -281,18 +282,11 @@ public class LogProcessingService {
             report.setCaseNumber((Integer) salesforceMetadata.get("case_number"));
         }
         if (salesforceMetadata.containsKey("step_name")) {
-            report.setStepName((String) salesforceMetadata.get("step_name"));
-        } else {
-            // Fallback: extract step name from filename if not available in Salesforce metadata
-            String fileName = logFile.getFileName().toString().replaceAll("\\.log$", "");
-            report.setStepName(fileName);
+            String normalized = stepNameNormalizer.normalize((String) salesforceMetadata.get("step_name"));
+            report.setStepName(normalized);
         }
         if (salesforceMetadata.containsKey("hostname")) {
-            report.setHostname((String) salesforceMetadata.get("hostname"));
-        } else {
-            // Fallback: extract hostname from log content if not available in Salesforce metadata
-            String fullContent = String.join("\n", lines);
-            extractHostnameFromLogContent(report, fullContent);
+            report.setDatacenter((String) salesforceMetadata.get("hostname"));
         }
         
         // Set report date from attachment LastModifiedDate
@@ -313,36 +307,8 @@ public class LogProcessingService {
         return report;
     }
     
-    // Moved extractErrorContext to ErrorAnalyzer class
+
     
-    private void extractHostnameFromLogContent(PmdReport report, String logContent) {
-        // Extract hostname from log content as fallback
-        Pattern hostnamePattern = Pattern.compile("Hostname:\\s*([^,\\n]+)");
-        Matcher hostnameMatcher = hostnamePattern.matcher(logContent);
-        if (hostnameMatcher.find()) {
-            String fullHostname = hostnameMatcher.group(1).trim();
-            report.setHostname(extractHostnameSuffix(fullHostname));
-        }
-    }
-    
-    /**
-     * Extract hostname suffix (last part after hyphen)
-     * Examples:
-     * - ops0-release1-2-hn3 -> hn3
-     * - worker-host-sp1 -> sp1
-     */
-    private String extractHostnameSuffix(String hostname) {
-        if (hostname == null || hostname.trim().isEmpty()) {
-            return hostname;
-        }
-        
-        String trimmed = hostname.trim();
-        int lastHyphen = trimmed.lastIndexOf('-');
-        if (lastHyphen >= 0 && lastHyphen < trimmed.length() - 1) {
-            return trimmed.substring(lastHyphen + 1);
-        }
-        return trimmed; // Return full hostname if no hyphen found
-    }
     
     private void deleteDirectory(Path directory) throws IOException {
         Files.walk(directory)

@@ -21,7 +21,8 @@ public class QueryRequest {
     @JsonProperty("attachment_id")
     private String attachmentId;
     
-    private String hostname;
+    @JsonProperty("datacenter")
+    private String datacenter;
     
 
     
@@ -71,12 +72,12 @@ public class QueryRequest {
         this.attachmentId = attachmentId;
     }
 
-    public String getHostname() {
-        return hostname;
+    public String getDatacenter() {
+        return datacenter;
     }
 
-    public void setHostname(String hostname) {
-        this.hostname = hostname;
+    public void setDatacenter(String datacenter) {
+        this.datacenter = datacenter;
     }
 
 

@@ -1,7 +1,5 @@
 package com.pmd_failure_bot.api;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/mcp")
 public class McpApiController {
     
-    private static final Logger logger = LoggerFactory.getLogger(McpApiController.class);
+    // Logger not used; remove to keep file minimal
 
     /**
      * Health check endpoint for MCP tool availability
@@ -39,7 +37,7 @@ public class McpApiController {
         private final String[] supportedParameters = {
             "case_number: Support case numbers (e.g., 'case 123456')",
             "step_name: Deployment step names (e.g., 'SSH deployment', 'GridForce')",
-            "hostname: Server or host names (e.g., 'server prod01', 'CS58')",
+            "datacenter: Datacenter or host suffix (e.g., 'am3', 'cs58')",
             "date: Absolute or relative dates (e.g., 'yesterday', '2024-01-15')",
             "work_id: GUS work item identifiers",
             "record_id: Salesforce record identifiers",
@@ -54,7 +52,7 @@ public class McpApiController {
             "What happened with the SSH deployment to prod servers?"
         };
         private final String[] tips = {
-            "Include at least one filter (case number, step name, hostname, etc.) for better results",
+            "Include at least one filter (case number, step name, datacenter, etc.) for better results",
             "Use relative dates like 'yesterday', 'last week', or 'today' for convenience",
             "Mention specific step names or partial matches (e.g., 'SSH' matches 'SSH_TO_ALL_HOSTS')",
             "Case numbers should be numeric only",
