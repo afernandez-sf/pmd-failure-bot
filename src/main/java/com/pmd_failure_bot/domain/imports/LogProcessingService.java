@@ -263,10 +263,9 @@ public class LogProcessingService {
         // Read log content
         List<String> lines = Files.readAllLines(logFile);
         
-        // Extract error context or use full log content
+        // Extract error context or fallback to full log content
         String errorContext = ErrorAnalyzer.extractErrorContext(lines);
         if (errorContext.isEmpty()) {
-            // If no error patterns detected, store the entire log content
             errorContext = String.join("\n", lines);
         }
         
@@ -307,9 +306,6 @@ public class LogProcessingService {
         
         return report;
     }
-    
-
-    
     
     private void deleteDirectory(Path directory) throws IOException {
         Files.walk(directory)

@@ -58,6 +58,11 @@ public class DatabaseQueryService {
                     for (Map<String, Object> row : results) {
                         row.remove("id");
                     }
+
+                    // Decode BYTEA 'content' to text for analysis tool
+                    if ("analyze_pmd_logs".equals(response.getFunctionName())) {
+                        decodeContentColumn(results);
+                    }
                     
                     // Call LLM again to generate a natural language response
                     String naturalLanguageResponse = generateNaturalLanguageResponse(userQuery, sql, results, response.getFunctionName());
@@ -108,6 +113,11 @@ public class DatabaseQueryService {
                     List<Map<String, Object>> results = jdbcTemplate.queryForList(sql);
                     for (Map<String, Object> row : results) {
                         row.remove("id");
+                    }
+
+                    // Decode BYTEA 'content' to text for analysis tool
+                    if ("analyze_pmd_logs".equals(response.getFunctionName())) {
+                        decodeContentColumn(results);
                     }
 
                     String naturalLanguageResponse = generateNaturalLanguageResponse(userQuery, sql, results, response.getFunctionName());
@@ -239,6 +249,54 @@ public class DatabaseQueryService {
      */
     private String formatResultsForLLM(List<Map<String, Object>> results) {
         return ResultFormatter.formatResultsForLLM(results);
+    }
+
+    /**
+     * Decode and decompress BYTEA 'content' values to UTF-8 strings for analysis queries.
+     */
+    private void decodeContentColumn(List<Map<String, Object>> results) {
+        for (Map<String, Object> row : results) {
+            if (row.containsKey("content")) {
+                Object raw = row.get("content");
+                String decoded = tryDecodeContent(raw);
+                row.put("content", decoded);
+            }
+        }
+    }
+
+    private String tryDecodeContent(Object value) {
+        if (value == null) return "";
+        try {
+            byte[] bytes = null;
+            if (value instanceof byte[]) {
+                bytes = (byte[]) value;
+            } else if (value instanceof java.sql.Blob) {
+                java.sql.Blob b = (java.sql.Blob) value;
+                bytes = b.getBytes(1, (int) b.length());
+            } else if (value instanceof String) {
+                return (String) value;
+            } else {
+                return String.valueOf(value);
+            }
+
+            if (bytes == null || bytes.length == 0) return "";
+
+            try (java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(bytes);
+                 java.util.zip.GZIPInputStream gis = new java.util.zip.GZIPInputStream(bais)) {
+                byte[] decompressed = gis.readAllBytes();
+                return new String(decompressed, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (Exception notGzip) {
+                try {
+                    return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                } catch (Exception e2) {
+                    logger.warn("Failed to decode content bytes; returning empty string: {}", e2.getMessage());
+                    return "";
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Error decoding content column: {}", e.getMessage());
+            return "";
+        }
     }
     
     

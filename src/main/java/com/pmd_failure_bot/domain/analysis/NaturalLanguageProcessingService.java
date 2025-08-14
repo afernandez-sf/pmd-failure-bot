@@ -139,16 +139,6 @@ public class NaturalLanguageProcessingService {
         }
     }
     
-    
-    // Removed regex fallback extraction to avoid heuristic parsing
-    
-    // Removed heuristic mapping of step name variations
-    
-    /**
-     * Extracts date from text including relative dates
-     */
-    // Removed heuristic date extraction
-    
     /**
      * Result class for parameter extraction
      */
