@@ -13,7 +13,8 @@ import java.util.Comparator;
 public class ErrorAnalyzer {
 
     /**
-     * Common error patterns to look for in log content
+     * Common error patterns to look for in log content. Note: we exclude low-signal
+     * patterns like 'warning' and 'retry' from triggers to avoid noisy contexts.
      */
     private static final List<String> ERROR_PATTERNS = List.of(
         "\\bERROR\\b",
@@ -31,9 +32,7 @@ public class ErrorAnalyzer {
         "timeout",
         "denied",
         "refused",
-        "abort",
-        "warning",
-        "retry"
+        "abort"
     );
 
     private ErrorAnalyzer() {
@@ -98,61 +97,127 @@ public class ErrorAnalyzer {
     }
     
     /**
-     * Extract error context from log content
+     * Extract error context from log content with block selection and de-duplication.
+     * Picks up to 5 highest-signal error blocks with surrounding context and limits total size.
      */
     public static String extractErrorContext(List<String> lines) {
-        List<Pattern> errorPatterns = ERROR_PATTERNS.stream()
-            .map(pattern -> Pattern.compile(pattern, Pattern.CASE_INSENSITIVE))
-            .toList();
-        
-        Set<Integer> errorIndices = new HashSet<>();
-        for (int i = 0; i < lines.size(); i++) {
+        if (lines == null || lines.isEmpty()) return "";
+
+        // Build trigger patterns with simple severity weights
+        class Trigger { final Pattern p; final int w; Trigger(String r, int w){ this.p = Pattern.compile(r, Pattern.CASE_INSENSITIVE); this.w = w; } }
+        List<Trigger> triggers = List.of(
+            new Trigger("\\bFATAL\\b", 5),
+            new Trigger("\\[ERROR\\]|\\berror\\b|exception", 4),
+            new Trigger("\\bFAILED\\b|Refusing to execute|Oracle not available", 4),
+            new Trigger("timeout|denied|refused|connection error|Unable to (get|retrieve|start)", 3)
+        );
+
+        // Identify candidate error blocks
+        record Block(int start, int end, int score, int index) {}
+        List<Block> blocks = new ArrayList<>();
+        int n = lines.size();
+        for (int i = 0; i < n; i++) {
             String line = lines.get(i);
-            for (Pattern pattern : errorPatterns) {
-                if (pattern.matcher(line).find()) {
-                    errorIndices.add(i);
+            int weight = 0;
+            for (Trigger t : triggers) {
+                if (t.p.matcher(line).find()) {
+                    weight = Math.max(weight, t.w);
+                }
+            }
+            if (weight == 0) continue;
+
+            int start = Math.max(0, i - 3);
+            int end = Math.min(n, i + 1);
+
+            // Extend forward to include continuation/stack lines up to a cap
+            int extra = 0;
+            while (end < n && extra < 12) {
+                String next = lines.get(end);
+                if (looksLikeContinuation(next)) {
+                    end++;
+                    extra++;
+                } else {
                     break;
                 }
             }
+
+            // Score favors higher severity and recency
+            int score = weight * 100000 + i; // later lines (higher i) slightly preferred
+            blocks.add(new Block(start, end, score, i));
         }
-        
-        if (errorIndices.isEmpty()) {
-            return "";
-        }
-        
-        // Create ranges with context
-        List<int[]> ranges = new ArrayList<>();
-        int contextLines = 3;
-        
-        for (int errorIdx : errorIndices.stream().sorted().toList()) {
-            int start = Math.max(0, errorIdx - contextLines);
-            int end = Math.min(lines.size(), errorIdx + contextLines + 1);
-            ranges.add(new int[]{start, end});
-        }
-        
-        // Merge overlapping ranges
-        List<int[]> mergedRanges = new ArrayList<>();
-        for (int[] range : ranges) {
-            if (mergedRanges.isEmpty() || range[0] > mergedRanges.get(mergedRanges.size() - 1)[1]) {
-                mergedRanges.add(range);
+
+        if (blocks.isEmpty()) return "";
+
+        // Merge overlapping/adjacent blocks
+        blocks.sort((a, b) -> Integer.compare(a.start(), b.start()));
+        List<Block> merged = new ArrayList<>();
+        Block cur = blocks.get(0);
+        for (int k = 1; k < blocks.size(); k++) {
+            Block b = blocks.get(k);
+            if (b.start() <= cur.end() + 1) {
+                // merge: take max end and max score/index window
+                cur = new Block(cur.start(), Math.max(cur.end(), b.end()), Math.max(cur.score(), b.score()), Math.max(cur.index(), b.index()));
             } else {
-                int[] lastRange = mergedRanges.get(mergedRanges.size() - 1);
-                lastRange[1] = Math.max(lastRange[1], range[1]);
+                merged.add(cur);
+                cur = b;
             }
         }
-        
-        // Extract lines from merged ranges
-        StringBuilder context = new StringBuilder();
-        for (int i = 0; i < mergedRanges.size(); i++) {
-            if (i > 0) {
-                context.append("\n--- ERROR CONTEXT SEPARATOR ---\n");
-            }
-            int[] range = mergedRanges.get(i);
-            for (int j = range[0]; j < range[1]; j++) {
-                context.append(lines.get(j)).append("\n");
-            }
+        merged.add(cur);
+
+        // Sort by score desc, pick top K
+        merged.sort((a, b) -> Integer.compare(b.score(), a.score()));
+        int maxBlocks = 5;
+        int totalCharLimit = 8000;
+        StringBuilder out = new StringBuilder();
+        java.util.Set<String> seenSnippets = new java.util.HashSet<>();
+        int used = 0;
+        int added = 0;
+        for (Block b : merged) {
+            if (added >= maxBlocks) break;
+            String snippet = slice(lines, b.start(), b.end());
+            String normalized = normalizeSnippet(snippet);
+            if (normalized.isBlank() || seenSnippets.contains(normalized)) continue;
+            if (used + snippet.length() > totalCharLimit) break;
+            if (out.length() > 0) out.append("\n--- ERROR CONTEXT SEPARATOR ---\n");
+            out.append(snippet);
+            used += snippet.length();
+            added++;
+            seenSnippets.add(normalized);
         }
-        
-        return context.toString();
+
+        return out.toString();
+    }
+
+    private static boolean looksLikeContinuation(String line) {
+        if (line == null) return false;
+        String s = line;
+        // Continuation if indented, or lacks obvious timestamp prefix, or is a stack/trace/detail line
+        if (s.startsWith("\t") || s.startsWith("    ") || s.startsWith("  ")) return true;
+        // Common timestamp formats (date or time). If it starts like a new timestamp, treat as new block
+        if (s.matches("^\\d{4}-\\d{2}-\\d{2}.*") || s.matches("^\\d{2}:\\d{2}:\\d{2}.*")) return false;
+        // Otherwise, allow 1-2 lines that are not timestamps as continuation
+        return true;
+    }
+
+    private static String slice(List<String> lines, int start, int end) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = start; i < Math.min(end, lines.size()); i++) {
+            sb.append(lines.get(i)).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private static String normalizeSnippet(String s) {
+        String[] arr = s.split("\n");
+        StringBuilder sb = new StringBuilder();
+        for (String line : arr) {
+            String t = line.trim();
+            if (t.isEmpty()) continue;
+            // Collapse repeating non-informative warnings
+            if (t.toLowerCase().contains("not registered with synner")) t = "Not registered with Synner";
+            if (t.toLowerCase().contains("2fa is required") && t.toLowerCase().contains("prompt_user")) t = "2FA is required and Synner code not available";
+            sb.append(t).append('\n');
+        }
+        return sb.toString().trim();
     }
 }
