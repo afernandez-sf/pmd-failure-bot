@@ -43,7 +43,7 @@ public class DatabaseQueryService {
             // Call LLM with function calling
             AIService.FunctionCallResponse response = aiService.generateWithFunctions(userQuery, tools);
             
-            if (response.isFunctionCall() && "query_pmd_logs".equals(response.getFunctionName())) {
+            if (response.isFunctionCall() && ("metrics_pmd_logs".equals(response.getFunctionName()) || "analyze_pmd_logs".equals(response.getFunctionName()) || "query_pmd_logs".equals(response.getFunctionName()))) {
                 // Parse the function arguments
                 JsonNode args = objectMapper.readTree(response.getArguments());
                 String sql = args.get("sql_query").asText();
@@ -60,7 +60,7 @@ public class DatabaseQueryService {
                     }
                     
                     // Call LLM again to generate a natural language response
-                    String naturalLanguageResponse = generateNaturalLanguageResponse(userQuery, sql, results);
+                    String naturalLanguageResponse = generateNaturalLanguageResponse(userQuery, sql, results, response.getFunctionName());
                     
                     return new DatabaseQueryResult(true, results, sql, naturalLanguageResponse, null);
                 } else {
@@ -76,43 +76,103 @@ public class DatabaseQueryService {
             return new DatabaseQueryResult(false, null, null, null, "Error processing query: " + e.getMessage());
         }
     }
+
+    /**
+     * Process a natural language query with a preferred intent for routing ("metrics" or "analysis").
+     */
+    public DatabaseQueryResult processNaturalLanguageQuery(String userQuery, String preferredIntent) {
+        try {
+            List<Map<String, Object>> tools;
+            if (preferredIntent != null) {
+                String intent = preferredIntent.toLowerCase(Locale.ROOT);
+                if ("metrics".equals(intent)) {
+                    tools = createMetricsTools();
+                } else if ("analysis".equals(intent)) {
+                    tools = createAnalysisTools();
+                } else {
+                    tools = createDatabaseQueryTools();
+                }
+            } else {
+                tools = createDatabaseQueryTools();
+            }
+
+            AIService.FunctionCallResponse response = aiService.generateWithFunctions(userQuery, tools);
+
+            if (response.isFunctionCall()) {
+                JsonNode args = objectMapper.readTree(response.getArguments());
+                String sql = args.get("sql_query").asText();
+
+                logger.info("🔍 FUNCTION CALLING SUCCESS! Generated SQL query: {}", sql);
+
+                if (isValidReadOnlyQuery(sql)) {
+                    List<Map<String, Object>> results = jdbcTemplate.queryForList(sql);
+                    for (Map<String, Object> row : results) {
+                        row.remove("id");
+                    }
+
+                    String naturalLanguageResponse = generateNaturalLanguageResponse(userQuery, sql, results, response.getFunctionName());
+                    return new DatabaseQueryResult(true, results, sql, naturalLanguageResponse, null);
+                } else {
+                    return new DatabaseQueryResult(false, null, sql, null, "Generated query is not a valid read-only SELECT statement");
+                }
+            } else {
+                return new DatabaseQueryResult(false, null, null, response.getContent(), "No database query generated");
+            }
+        } catch (Exception e) {
+            logger.error("Error processing natural language query: ", e);
+            return new DatabaseQueryResult(false, null, null, null, "Error processing query: " + e.getMessage());
+        }
+    }
     
     /**
      * Create the database query function definition
      */
     private List<Map<String, Object>> createDatabaseQueryTools() {
-        Map<String, Object> tool = new HashMap<>();
-        tool.put("type", "function");
-        
-        Map<String, Object> function = new HashMap<>();
-        function.put("name", "query_pmd_logs");
-        function.put("description", "Query the PMD failure logs database to find information about deployment failures, errors, and issues. " +
-                                   "The database contains logs from various deployment steps with details about failures, timestamps, datacenters, and error content.");
-        
-        Map<String, Object> parameters = new HashMap<>();
-        parameters.put("type", "object");
-        
-        Map<String, Object> properties = new HashMap<>();
-        
-        Map<String, Object> sqlQuery = new HashMap<>();
-        sqlQuery.put("type", "string");
-        sqlQuery.put("description", "A valid PostgreSQL SELECT query to search the pmd_failure_logs table. " +
-                                   "Available columns: record_id, work_id, case_number, step_name, attachment_id, datacenter, content (TEXT), report_date. " +
-                                   "Do NOT select the internal 'id' column in results. " +
-                                   "IMPORTANT: step_name is stored as a canonical name (no pod suffix). " +
-                                   "Example filters: WHERE step_name = 'STOP_APPS' or WHERE step_name IN ('SSH_TO_ALL_HOSTS','GRIDFORCE_APP_LOG_COPY'). " +
-                                   "For date filtering use: report_date = 'YYYY-MM-DD' or report_date >= 'YYYY-MM-DD'. " +
-                                   "Common step names: GRIDFORCE_APP_LOG_COPY, SSH_TO_ALL_HOSTS, SETUP_BROKER_NEW_PRI, DB_POST_VALIDATION, STOP_APPS. " +
-                                   "Always use LIMIT to avoid returning too many results (max 20).");
-        
-        properties.put("sql_query", sqlQuery);
-        parameters.put("properties", properties);
-        parameters.put("required", List.of("sql_query"));
-        
-        function.put("parameters", parameters);
-        tool.put("function", function);
-        
-        return List.of(tool);
+        // Metrics / aggregation tool
+        Map<String, Object> metricsTool = new HashMap<>();
+        metricsTool.put("type", "function");
+        Map<String, Object> metricsFn = new HashMap<>();
+        metricsFn.put("name", "metrics_pmd_logs");
+        metricsFn.put("description", "Generate a read-only SELECT for counts, breakdowns, and trends over pmd_failure_logs. Prefer GROUP BY step_name (and/or report_date) when the user asks about different failures or a breakdown. Include an aggregated numeric column (e.g., COUNT(*) AS failures). Do NOT select the heavy 'content' column. Use LIMIT <= 500.");
+        Map<String, Object> metricsParams = new HashMap<>();
+        metricsParams.put("type", "object");
+        Map<String, Object> metricsProps = new HashMap<>();
+        Map<String, Object> metricsSql = new HashMap<>();
+        metricsSql.put("type", "string");
+        metricsSql.put("description", "PostgreSQL SELECT over pmd_failure_logs with aggregates and GROUP BY as needed. Columns available: record_id, work_id, case_number, step_name, attachment_id, datacenter, report_date. Do NOT select 'id' or 'content'.");
+        metricsProps.put("sql_query", metricsSql);
+        metricsParams.put("properties", metricsProps);
+        metricsParams.put("required", List.of("sql_query"));
+        metricsFn.put("parameters", metricsParams);
+        metricsTool.put("function", metricsFn);
+
+        // Analysis tool (retrieve representative error content for explanation)
+        Map<String, Object> analysisTool = new HashMap<>();
+        analysisTool.put("type", "function");
+        Map<String, Object> analysisFn = new HashMap<>();
+        analysisFn.put("name", "analyze_pmd_logs");
+        analysisFn.put("description", "Generate a read-only SELECT to fetch representative failure logs (including 'content') for explanatory analysis. Select fields: record_id, work_id, step_name, case_number, datacenter, report_date, content. Filter by step_name/date/case when provided. Order by recency or relevance. LIMIT <= 10.");
+        Map<String, Object> analysisParams = new HashMap<>();
+        analysisParams.put("type", "object");
+        Map<String, Object> analysisProps = new HashMap<>();
+        Map<String, Object> analysisSql = new HashMap<>();
+        analysisSql.put("type", "string");
+        analysisSql.put("description", "PostgreSQL SELECT over pmd_failure_logs selecting record_id, work_id, step_name, case_number, datacenter, report_date, content. Do NOT select 'id'. LIMIT <= 10.");
+        analysisProps.put("sql_query", analysisSql);
+        analysisParams.put("properties", analysisProps);
+        analysisParams.put("required", List.of("sql_query"));
+        analysisFn.put("parameters", analysisParams);
+        analysisTool.put("function", analysisFn);
+
+        return List.of(metricsTool, analysisTool);
+    }
+
+    private List<Map<String, Object>> createMetricsTools() {
+        return List.of(createDatabaseQueryTools().get(0));
+    }
+
+    private List<Map<String, Object>> createAnalysisTools() {
+        return List.of(createDatabaseQueryTools().get(1));
     }
     
     /**
@@ -160,9 +220,12 @@ public class DatabaseQueryService {
     /**
      * Generate a natural language response based on the query results
      */
-    private String generateNaturalLanguageResponse(String originalQuery, String sql, List<Map<String, Object>> results) {
+    private String generateNaturalLanguageResponse(String originalQuery, String sql, List<Map<String, Object>> results, String functionName) {
         try {
-            String prompt = promptTemplates.nlSummary(originalQuery, sql, formatResultsForLLM(results), results.size());
+            String formatted = formatResultsForLLM(results);
+            String prompt = "analyze_pmd_logs".equals(functionName)
+                ? promptTemplates.nlErrorSummary(originalQuery, sql, formatted, results.size())
+                : promptTemplates.nlSummary(originalQuery, sql, formatted, results.size());
             return aiService.generate(prompt);
         } catch (Exception e) {
             logger.error("Error generating natural language response: ", e);

@@ -24,7 +24,7 @@ public class PromptTemplates {
               .append("- datacenter: Target datacenter or host suffix (if mentioned)\n")
               .append("- report_date: Date in YYYY-MM-DD format (if mentioned, including relative dates like \"yesterday\", \"last week\")\n")
               .append("- query: The refined natural language question to ask about the logs\n")
-              .append("- intent: Either 'query' (asking questions about logs) or 'import' (requesting to import/fetch/pull logs)\n")
+              .append("- intent: One of 'import', 'metrics', or 'analysis'\n")
               .append("- confidence: Your confidence level (0.0 to 1.0) in the parameter extraction\n\n")
               .append("Guidelines:\n")
               .append("1. Only extract parameters that are explicitly mentioned or strongly implied\n")
@@ -32,12 +32,15 @@ public class PromptTemplates {
               .append("3. For step names, match partial names to known patterns (e.g., \"SSH\" -> \"SSH_TO_ALL_HOSTS\")\n")
               .append("4. For case numbers, extract only numeric values\n")
               .append("5. The query field should be the main question being asked, cleaned of parameter information\n")
-              .append("6. For intent: use 'import' for requests to fetch/import/pull/download logs, 'query' for asking questions about existing logs\n")
+              .append("6. For intent: \n")
+              .append("   - 'import' for requests to fetch/import/pull/download logs\n")
+              .append("   - 'metrics' for counts, breakdowns, or trends over time\n")
+              .append("   - 'analysis' to explain errors, root cause, or analyze logs\n")
               .append("7. Set confidence based on how clearly the parameters were stated\n")
               .append("8. If no parameters are found, return null for those fields\n")
               .append("9. Return ONLY valid JSON, no other text\n\n")
               .append("Example query: \"What went wrong with case 123456's SSH deployment yesterday?\"\n")
-              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"datacenter\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"query\", \"confidence\": 0.9}\n\n")
+              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"datacenter\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"analysis\", \"confidence\": 0.9}\n\n")
               .append("Example import: \"Import logs for case 567890\"\n")
               .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 567890, \"step_name\": null, \"attachment_id\": null, \"datacenter\": null, \"report_date\": null, \"query\": \"Import logs\", \"intent\": \"import\", \"confidence\": 0.95}\n")
               .append("</instructions>\n\n");
@@ -62,15 +65,17 @@ public class PromptTemplates {
         return String.format(
             "<instructions>\n" +
             "You are an expert database analyst specialized in analyzing PMD deployment failure logs. Review the database results inside <context></context> XML tags, and answer the question inside <question></question> XML tags.\n\n" +
-            "Guidelines:\n" +
-            "- Focus on identifying specific error patterns, root causes, and failure points\n" +
-            "- Highlight commonalities across multiple failures if present\n" +
-            "- Reference specific case numbers, hostnames, or step names from the data when relevant\n" +
-            "- Prioritize explaining WHAT went wrong and WHY it failed\n" +
-            "- When analyzing steps, note if certain step types fail more frequently\n" +
-            "- Be technical and precise with error details that would help engineers troubleshoot\n" +
-            "- Provide your answer in plain text, without any formatting\n" +
-            "- Respond \"Insufficient data to determine root cause.\" if the logs don't contain enough information\n" +
+            "Context structure: You are given a compact data summary and a small JSON blob. Use them to compute numbers, but DO NOT mention internal data structure names (JSON, tables, columns, field names, or SQL) in your answer. Keep answers short for Slack.\n\n" +
+            "Rules for answering:\n" +
+            "- If the user asks for counts (e.g., 'how many', 'number of', 'count'), compute totals from the machine-readable data, not from the number of rows shown.\n" +
+            "  * If there are per-group counts (e.g., counts by day or by step), sum those values to produce totals.\n" +
+            "  * Provide a concise breakdown (e.g., by step) when the user asks for \"different failures\". Keep answers short and conversational for Slack.\n" +
+            "- Provide concise answers; for pure counts, respond with the exact number and a short clarification (e.g., '11 GRIDFORCE_APP_LOG_COPY failures in May 2025').\n" +
+            "- For analysis questions, summarize patterns in plain language and avoid referencing internal data structure names.\n" +
+            "- Do NOT infer counts from the number of rows; a single row may represent an aggregate across many items.\n" +
+            "- Do NOT include next steps, follow-ups, suggestions, or requests for more data. Only answer the question asked.\n" +
+            "- Provide your answer in plain text, without any formatting.\n" +
+            "- Respond 'Insufficient data to determine root cause.' if the logs don't contain enough information.\n" +
             "</instructions>\n\n" +
             "<context>\n" +
             "SQL Query: %s\n\n" +
@@ -81,6 +86,35 @@ public class PromptTemplates {
             "</question>",
             sql,
             resultCount,
+            formattedResults,
+            originalQuery
+        );
+    }
+
+    /**
+     * Creates a prompt for explaining errors from log content (analysis mode)
+     */
+    public String nlErrorSummary(String originalQuery, String sql, String formattedResults, int resultCount) {
+        return String.format(
+            "<instructions>\n" +
+            "You are an expert in diagnosing deployment failures. Read the provided context and explain the likely causes and key error messages in plain language.\n\n" +
+            "Guidelines:\n" +
+            "- Focus on the most informative error lines and patterns (fatal, exception, timeout, denied/refused, connection errors).\n" +
+            "- Group similar issues together; avoid listing many near-duplicates.\n" +
+            "- Reference the step and date when helpful, but do not mention internal implementation details.\n" +
+            "- Keep the answer short and actionable for Slack.\n" +
+            "- Include a short list of links to the work items used in your analysis when IDs are present. Use the work ID as the link text, and the URL as https://gus.lightning.force.com/lightning/r/ADM_Work__c/{record_id}/view (format: <https://gus.lightning.force.com/lightning/r/ADM_Work__c/{record_id}/view|{work_id}>).\n" +
+            "- If the data is insufficient, say so briefly.\n" +
+            "- Do NOT include next steps, follow-ups, suggestions, troubleshooting checklists, or requests for additional information. Only explain what happened and the likely causes.\n" +
+            "</instructions>\n\n" +
+            "<context>\n" +
+            "SQL Query: %s\n\n" +
+            "%s\n" +
+            "</context>\n\n" +
+            "<question>\n" +
+            "%s\n" +
+            "</question>",
+            sql,
             formattedResults,
             originalQuery
         );

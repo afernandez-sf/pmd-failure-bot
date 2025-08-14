@@ -2,14 +2,12 @@ package com.pmd_failure_bot.api;
 
 import com.pmd_failure_bot.dto.LogImportRequest;
 import com.pmd_failure_bot.dto.LogImportResponse;
-import com.pmd_failure_bot.dto.NaturalLanguageQueryRequest;
 import com.pmd_failure_bot.dto.NaturalLanguageQueryResponse;
 import com.pmd_failure_bot.dto.QueryRequest;
 import com.pmd_failure_bot.domain.imports.LogImportService;
 import com.pmd_failure_bot.domain.analysis.NaturalLanguageProcessingService;
 import com.pmd_failure_bot.infrastructure.salesforce.SalesforceService;
 
-import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -48,20 +47,21 @@ public class ImportController {
      */
     @PostMapping
     public ResponseEntity<NaturalLanguageQueryResponse> processImportRequest(
-            @Valid @RequestBody NaturalLanguageQueryRequest request) {
+            @RequestBody Map<String, Object> body) {
         
         long startTime = System.currentTimeMillis();
         String conversationId = UUID.randomUUID().toString();
         
         try {
+            String queryText = body != null && body.get("query") instanceof String ? (String) body.get("query") : null;
             logger.info("Processing import request: '{}' (conversation: {})", 
-                       request.getQuery(), conversationId);
+                       queryText, conversationId);
             
             // Extract parameters from natural language query
             NaturalLanguageProcessingService.ParameterExtractionResult extractionResult = 
-                nlpService.extractParameters(request.getQuery(), request.getConversationContext());
+                nlpService.extractParameters(queryText != null ? queryText : "", null);
             
-            return handleImportRequest(request, extractionResult, conversationId, startTime);
+            return handleImportRequest(queryText, extractionResult, conversationId, startTime);
             
         } catch (Exception e) {
             logger.error("Error processing import request: ", e);
@@ -84,7 +84,7 @@ public class ImportController {
      * Handle import requests through natural language
      */
     private ResponseEntity<NaturalLanguageQueryResponse> handleImportRequest(
-            NaturalLanguageQueryRequest request, 
+            String originalQuery,
             NaturalLanguageProcessingService.ParameterExtractionResult extractionResult,
             String conversationId, 
             long startTime) {

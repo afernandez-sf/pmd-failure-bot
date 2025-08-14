@@ -98,20 +98,20 @@ public class QueryController {
             NaturalLanguageQueryRequest request, String conversationId, long startTime) {
         
         try {
-            // Use DatabaseQueryService for function calling
+            // Route to metrics or analysis based on extracted intent
+            String intent = "metrics"; // default
+            try {
+                NaturalLanguageProcessingService.ParameterExtractionResult extraction = 
+                    nlpService.extractParameters(request.getQuery(), request.getConversationContext());
+                intent = extraction.getIntent();
+            } catch (Exception ignored) {}
+
             DatabaseQueryService.DatabaseQueryResult result = 
-                databaseQueryService.processNaturalLanguageQuery(request.getQuery());
+                databaseQueryService.processNaturalLanguageQuery(request.getQuery(), intent);
             
             if (result.isSuccessful()) {
-                // Convert results to report info
-                List<QueryResponse.ReportInfo> reportPaths = result.getResults().stream()
-                    .map(row -> {
-                        String recordId = row.get("record_id") != null ? row.get("record_id").toString() : "N/A";
-                        String workId = row.get("work_id") != null ? row.get("work_id").toString() : "N/A";
-                        return new QueryResponse.ReportInfo(recordId, workId);
-                    })
-                    .distinct()
-                    .collect(Collectors.toList());
+                // Related work items removed; do not expose report links
+                List<QueryResponse.ReportInfo> reportPaths = List.of();
                 
                 long executionTimeMs = System.currentTimeMillis() - startTime;
                 

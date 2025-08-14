@@ -34,6 +34,8 @@ public class SlackService {
     
     // Simple cache to prevent duplicate processing of the same message
     private final java.util.Set<String> processedMessages = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // Executor to process mentions concurrently (up to ~12 users)
+    private final java.util.concurrent.ExecutorService mentionExecutor = java.util.concurrent.Executors.newFixedThreadPool(12);
 
     @Value("${slack.bot.channel:pmd-slack-bot}")
     private String botChannelName;
@@ -53,47 +55,42 @@ public class SlackService {
      * Initialize Slack event handlers
      */
     private void initializeSlackHandlers() {
-        // Handle app mentions in channels only
+        // Handle app mentions in channels only (ACK immediately; process asynchronously)
         slackApp.event(AppMentionEvent.class, (payload, ctx) -> {
-            handleAppMention(payload.getEvent(), ctx);
+            var event = payload.getEvent();
+            String text = event.getText();
+            String userId = event.getUser();
+            String channel = event.getChannel();
+            String threadTs = event.getTs();
+
+            // Deduplicate per-message
+            String eventKey = channel + ":" + threadTs + ":" + (text != null ? text.hashCode() : 0);
+            if (!processedMessages.add(eventKey)) {
+                return ctx.ack();
+            }
+
+            // Clean text and schedule processing without blocking ACK
+            String cleanedText = text != null ? text.replaceAll("<@[A-Z0-9]+>", "").trim() : "";
+            mentionExecutor.submit(() -> handleAppMentionInternal(cleanedText, userId, channel, threadTs));
             return ctx.ack();
         });
     }
 
     /**
-     * Handle application mention events
+     * Internal async handler for app mention
      */
-    private void handleAppMention(AppMentionEvent event, EventContext ctx) {
+    private void handleAppMentionInternal(String cleanedText, String userId, String channel, String threadTs) {
         try {
-            String text = event.getText();
-            String userId = event.getUser();
-            String channel = event.getChannel();
-            String eventKey = channel + ":" + event.getTs() + ":" + text.hashCode();
-            
-            // Prevent duplicate processing
-            if (processedMessages.contains(eventKey)) {
-                logger.debug("Skipping duplicate message: {}", eventKey);
-                return;
-            }
-            processedMessages.add(eventKey);
-            
-            logger.info("Received mention from user {} in channel {}: {}", userId, channel, text);
-            
-            // Remove the bot mention from the text
-            String cleanedText = text.replaceAll("<@[A-Z0-9]+>", "").trim();
-            
-            if (cleanedText.isEmpty()) {
-                return;
-            }
-            
-            processQueryAndRespond(cleanedText, channel, ctx, userId, event.getTs());
-            
+            if (cleanedText == null || cleanedText.isBlank()) return;
+            logger.info("Received mention from user {} in channel {}: {}", userId, channel, cleanedText);
+            processQueryAndRespond(cleanedText, channel, null, userId, threadTs);
         } catch (Exception e) {
             logger.error("Error handling app mention: ", e);
             try {
-                ctx.client().chatPostMessage(r -> r
-                    .channel(event.getChannel())
-                    .threadTs(event.getTs())
+                // Fallback to app client
+                slackApp.client().chatPostMessage(r -> r
+                    .channel(channel)
+                    .threadTs(threadTs)
                     .text("❌ Sorry, I encountered an error processing your request. Please try again later.")
                 );
             } catch (Exception ex) {
@@ -123,11 +120,13 @@ public class SlackService {
             String formattedResponse;
             
             if (extractionResult.isImportRequest()) {
-                // Handle import request
-                formattedResponse = processImportRequest(queryRequest, queryText, extractionResult, channel, threadTs);
+                // Handle import request (reactions managed fully inside the background task)
+                processImportRequest(queryRequest, queryText, extractionResult, channel, threadTs);
+                return; // Do not remove eyes or add check here; background task will manage
             } else {
-                // Handle query request using DatabaseQueryService directly
-                DatabaseQueryService.DatabaseQueryResult result = databaseQueryService.processNaturalLanguageQuery(queryText);
+                // Route by intent: metrics vs analysis
+                String intent = extractionResult.getIntent();
+                DatabaseQueryService.DatabaseQueryResult result = databaseQueryService.processNaturalLanguageQuery(queryText, intent);
                 formattedResponse = formatSlackResponseWithResult(result, queryText, extractionResult);
             }
             
@@ -184,18 +183,20 @@ public class SlackService {
                 searchCriteria = "step " + importRequest.getStepName();
             }
             
-            // Start background processing in a separate thread
+            // Start background processing in a separate thread (manage reactions in correct order)
             new Thread(() -> {
                 try {
-                    // Change emoji to spinning arrows (processing)
-                    updateReaction(channelId, messageTs, "eyes", "arrows_counterclockwise");
+                    // Remove eyes, then add arrows to indicate active processing
+                    removeReaction(channelId, messageTs, "eyes", null);
+                    addReaction(channelId, messageTs, "arrows_counterclockwise", null);
                     
                     // Perform the actual import
                     ResponseEntity<LogImportResponse> importResponseEntity = logImportService.importLogs(importRequest);
                     LogImportResponse importResponse = importResponseEntity.getBody();
                     
-                    // Change emoji to checkmark (completed)
-                    updateReaction(channelId, messageTs, "arrows_counterclockwise", "white_check_mark");
+                    // Swap arrows -> check when done
+                    removeReaction(channelId, messageTs, "arrows_counterclockwise", null);
+                    addReaction(channelId, messageTs, "white_check_mark", null);
                     
                     // Send simple completion message in thread
                     String completionMessage = String.format("Successfully imported %d logs for %s", 
@@ -204,13 +205,14 @@ public class SlackService {
                     
                 } catch (Exception e) {
                     logger.error("Background import failed: ", e);
-                    // Change emoji to X (failed)
-                    updateReaction(channelId, messageTs, "arrows_counterclockwise", "x");
+                    // Swap arrows -> X on failure
+                    removeReaction(channelId, messageTs, "arrows_counterclockwise", null);
+                    addReaction(channelId, messageTs, "x", null);
                     sendMessageInThread(channelId, "Import failed for " + searchCriteria + ": " + e.getMessage(), null, messageTs);
                 }
             }).start();
             
-            // Return empty string to avoid sending any message
+            // We managed reactions and messaging asynchronously; return empty string
             return "";
             
         } catch (Exception e) {
@@ -236,22 +238,7 @@ public class SlackService {
         String analysisText = result.getNaturalLanguageResponse();
         sb.append(analysisText);
         
-        if (result.getResults() != null && !result.getResults().isEmpty()) {
-            sb.append("\n\n*Related Work Items:*\n");
-            for (Map<String, Object> row : result.getResults()) {
-                // Convert Salesforce record ID to GUS work item URL
-                String recordId = row.get("record_id") != null ? row.get("record_id").toString() : "N/A";
-                String workId = row.get("work_id") != null ? row.get("work_id").toString() : "N/A";
-                
-                String gusUrl = "https://gus.lightning.force.com/lightning/r/ADM_Work__c/" + recordId + "/view";
-                
-                // Use work ID as display text if available, otherwise fall back to record ID
-                String displayText = !workId.equals("N/A") ? workId : recordId;
-                
-                // Format as Slack clickable link: <url|text>
-                sb.append("• <").append(gusUrl).append("|").append(displayText).append(">\n");
-            }
-        }
+        // Related work items removed from Slack responses
         
         // Add extracted parameters info for transparency (if low confidence)
         if (extractionResult.getConfidence() < 0.6) {

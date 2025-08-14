@@ -23,7 +23,7 @@ public class PmdReport {
     @Column(name = "step_name")
     private String stepName;
     
-    @Column(name = "attachment_id")
+    @Column(name = "attachment_id", unique = true)
     private String attachmentId;
     
     @Column(name = "datacenter")

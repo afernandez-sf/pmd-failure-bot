@@ -57,8 +57,8 @@ public class LogProcessingService {
         result.recordId = recordId;
         result.stepName = stepName;
         
-        // Check if already processed
-        if (isAttachmentProcessed(attachmentId)) {
+        // Check if already processed (fast path)
+        if (pmdReportRepository.existsByAttachmentId(attachmentId)) {
             result.status = "SKIPPED";
             result.message = "Attachment already processed";
             logger.info("Skipping already processed attachment: {}", attachmentId);
@@ -110,7 +110,13 @@ public class LogProcessingService {
                 try {
                     PmdReport report = processLogFile(logFile, attachmentId, recordId, salesforceMetadata);
                     if (report != null) {
-                        pmdReportRepository.save(report);
+                        // Double-insert safeguard: skip if another thread/process already saved this attachment
+                        if (pmdReportRepository.existsByAttachmentId(report.getAttachmentId())) {
+                            logger.info("Attachment {} already exists in DB; skipping save.", report.getAttachmentId());
+                            result.status = "SKIPPED";
+                        } else {
+                            pmdReportRepository.save(report);
+                        }
                         successfulLogs++;
                         logger.info("Processed log file: {}", logFile.getFileName());
                     } else {
@@ -144,11 +150,6 @@ public class LogProcessingService {
         }
         
         return result;
-    }
-    
-    private boolean isAttachmentProcessed(String attachmentId) {
-        return !pmdReportRepository.findByFilters(null, null, null, null, attachmentId,
-                null).isEmpty();
     }
     
     private String sanitizeFileName(String fileName) {

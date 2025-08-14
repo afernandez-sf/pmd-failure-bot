@@ -121,12 +121,17 @@ public class NaturalLanguageProcessingService {
                 confidence = responseNode.get("confidence").asDouble();
             }
             
-            String intent = "query"; // Default intent
+            String intent = "metrics"; // Default intent for queries is metrics
             if (responseNode.has("intent") && !responseNode.get("intent").isNull()) {
                 intent = responseNode.get("intent").asText();
             }
-            
-            return new ParameterExtractionResult(queryRequest, confidence, "LLM_EXTRACTION", intent);
+            // response_mode (metrics vs analysis) for 'query' intent
+            String responseMode = null;
+            if (responseNode.has("response_mode") && !responseNode.get("response_mode").isNull()) {
+                responseMode = responseNode.get("response_mode").asText();
+            }
+
+            return new ParameterExtractionResult(queryRequest, confidence, "LLM_EXTRACTION", intent, responseMode);
             
         } catch (JsonProcessingException e) {
             logger.error("Failed to parse LLM response as JSON: {}", llmResponse, e);
@@ -158,10 +163,23 @@ public class NaturalLanguageProcessingService {
             this.confidence = confidence;
             this.extractionMethod = extractionMethod;
             this.intent = intent != null ? intent : "query"; // Default to query
+            this.responseMode = null;
+        }
+        
+        public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod, String intent, String responseMode) {
+            this.queryRequest = queryRequest;
+            this.confidence = confidence;
+            this.extractionMethod = extractionMethod;
+            this.intent = intent != null ? intent : "query";
+            this.responseMode = responseMode;
         }
         
         public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod) {
-            this(queryRequest, confidence, extractionMethod, "query");
+            this.queryRequest = queryRequest;
+            this.confidence = confidence;
+            this.extractionMethod = extractionMethod;
+            this.intent = "metrics";
+            this.responseMode = null;
         }
         
         public QueryRequest getQueryRequest() {
@@ -183,5 +201,8 @@ public class NaturalLanguageProcessingService {
         public boolean isImportRequest() {
             return "import".equalsIgnoreCase(intent);
         }
+        
+        private final String responseMode; // "metrics" or "analysis" for query intent
+        public String getResponseMode() { return responseMode; }
     }
 }

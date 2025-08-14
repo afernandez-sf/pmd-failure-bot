@@ -29,4 +29,6 @@ public interface PmdReportRepository extends JpaRepository<PmdReport, Long> {
     );
 
     List<PmdReport> findByAttachmentIdIn(List<String> attachmentIds);
+
+    boolean existsByAttachmentId(String attachmentId);
 }
