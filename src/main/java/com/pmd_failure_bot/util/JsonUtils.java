@@ -1,4 +1,4 @@
-package com.pmd_failure_bot.common.util;
+package com.pmd_failure_bot.util;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -1,6 +1,7 @@
 package com.pmd_failure_bot.integration.salesforce;
 
 import com.pmd_failure_bot.config.SalesforceConfig;
+import com.pmd_failure_bot.util.StepNameNormalizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
@@ -11,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import com.pmd_failure_bot.common.util.StepNameNormalizer;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -109,7 +109,7 @@ public class SalesforceService {
 				FROM Attachments
 			)
 			FROM ADM_Work__c 
-			WHERE Subject__c LIKE 'Step: %s%%Status: FAILED%%'
+			WHERE Subject__c LIKE 'Step: %s%%Status: FAILED%%PMD/IR%%'
 			""", stepName);
         
         logger.info("Querying failed step: {}", stepName);
@@ -133,7 +133,7 @@ public class SalesforceService {
 				FROM Attachments
 			)
 			FROM ADM_Work__c 
-			WHERE WorkId_and_Subject__c LIKE '%%Status: FAILED%%Case: %d%%'
+			WHERE WorkId_and_Subject__c LIKE '%%Status: FAILED%%Case: %d%%PMD/IR%%'
 			""", caseNumber);
 
         logger.info("Querying failed attachments for case: {}", caseNumber);

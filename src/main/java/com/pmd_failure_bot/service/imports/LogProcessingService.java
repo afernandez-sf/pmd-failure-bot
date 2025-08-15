@@ -3,17 +3,17 @@ package com.pmd_failure_bot.service.imports;
 import com.pmd_failure_bot.config.SalesforceConfig;
 import com.pmd_failure_bot.data.entity.PmdReport;
 import com.pmd_failure_bot.data.repository.PmdReportRepository;
-import com.pmd_failure_bot.common.util.StepNameNormalizer;
 import com.pmd_failure_bot.integration.salesforce.SalesforceService;
 import com.pmd_failure_bot.service.analysis.ErrorAnalyzer;
 import com.pmd_failure_bot.service.imports.extract.TarGzExtractorStrategy;
+import com.pmd_failure_bot.util.StepNameNormalizer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.*;
 import java.time.LocalDate;

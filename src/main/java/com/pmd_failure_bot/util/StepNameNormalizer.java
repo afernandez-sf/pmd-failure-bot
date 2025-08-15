@@ -1,4 +1,4 @@
-package com.pmd_failure_bot.common.util;
+package com.pmd_failure_bot.util;
 
 import com.pmd_failure_bot.data.repository.StepNameRepository;
 import org.springframework.beans.factory.annotation.Autowired;

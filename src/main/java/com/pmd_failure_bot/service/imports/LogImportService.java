@@ -4,10 +4,11 @@ import com.pmd_failure_bot.web.dto.request.LogImportRequest;
 import com.pmd_failure_bot.web.dto.response.LogImportResponse;
 import com.pmd_failure_bot.data.repository.PmdReportRepository;
 import com.pmd_failure_bot.integration.salesforce.SalesforceService;
+import com.pmd_failure_bot.util.StepNameNormalizer;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import com.pmd_failure_bot.common.util.StepNameNormalizer;
 
 import java.util.ArrayList;
 import java.util.HashMap;
