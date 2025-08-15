@@ -18,11 +18,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
     SlackConfig.class
 })
 @ComponentScan(basePackages = {
-    "com.pmd_failure_bot.api",
-    "com.pmd_failure_bot.domain",
-    "com.pmd_failure_bot.infrastructure",
-    "com.pmd_failure_bot.repository",
-    "com.pmd_failure_bot.util"
+    "com.pmd_failure_bot.web",
+    "com.pmd_failure_bot.service",
+    "com.pmd_failure_bot.integration",
+    "com.pmd_failure_bot.data",
+    "com.pmd_failure_bot.common"
 })
 public class ApplicationConfig {
 

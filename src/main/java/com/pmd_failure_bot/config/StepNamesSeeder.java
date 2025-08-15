@@ -1,7 +1,7 @@
 package com.pmd_failure_bot.config;
 
-import com.pmd_failure_bot.entity.StepName;
-import com.pmd_failure_bot.repository.StepNameRepository;
+import com.pmd_failure_bot.data.entity.StepName;
+import com.pmd_failure_bot.data.repository.StepNameRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

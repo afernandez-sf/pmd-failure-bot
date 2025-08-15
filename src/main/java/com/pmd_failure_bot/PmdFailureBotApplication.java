@@ -12,7 +12,7 @@ import com.pmd_failure_bot.config.ApplicationConfig;
  * Main application class for PMD Failure Bot
  */
 @SpringBootApplication
-@EnableJpaRepositories(basePackages = "com.pmd_failure_bot.repository")
+@EnableJpaRepositories(basePackages = "com.pmd_failure_bot.data.repository")
 @Import(ApplicationConfig.class)
 public class PmdFailureBotApplication {
 
