@@ -6,10 +6,10 @@ import com.pmd_failure_bot.web.dto.request.QueryRequest;
 import com.pmd_failure_bot.service.analysis.NaturalLanguageProcessingService;
 import com.pmd_failure_bot.service.imports.LogImportService;
 import com.pmd_failure_bot.service.query.DatabaseQueryService;
-import com.pmd_failure_bot.integration.salesforce.SalesforceService;
 import com.slack.api.bolt.App;
 import com.slack.api.bolt.context.builtin.EventContext;
 import com.slack.api.model.event.AppMentionEvent;
+import com.slack.api.model.event.MessageEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +27,6 @@ public class SlackService {
     private final NaturalLanguageProcessingService nlpService;
     private final DatabaseQueryService databaseQueryService;
     private final App slackApp;
-    private final SalesforceService salesforceService;
     private final LogImportService logImportService;
     
     // Simple cache to prevent duplicate processing of the same message
@@ -40,11 +39,10 @@ public class SlackService {
 
     @Autowired
     public SlackService(NaturalLanguageProcessingService nlpService, DatabaseQueryService databaseQueryService, App slackApp,
-                       SalesforceService salesforceService, LogImportService logImportService) {
+                       LogImportService logImportService) {
         this.nlpService = nlpService;
         this.databaseQueryService = databaseQueryService;
         this.slackApp = slackApp;
-        this.salesforceService = salesforceService;
         this.logImportService = logImportService;
         initializeSlackHandlers();
     }
@@ -69,6 +67,33 @@ public class SlackService {
 
             // Clean text and schedule processing without blocking ACK
             String cleanedText = text != null ? text.replaceAll("<@[A-Z0-9]+>", "").trim() : "";
+            mentionExecutor.submit(() -> handleAppMentionInternal(cleanedText, userId, channel, threadTs));
+            return ctx.ack();
+        });
+
+        // Handle direct messages (IM) to the bot similar to mentions
+        slackApp.event(MessageEvent.class, (payload, ctx) -> {
+            var event = payload.getEvent();
+            // Ignore edited/changed/bot messages
+            if (event.getSubtype() != null && !event.getSubtype().isEmpty()) {
+                return ctx.ack();
+            }
+            String channel = event.getChannel();
+            // Only process direct messages (IM channels start with 'D')
+            if (channel == null || !channel.startsWith("D")) {
+                return ctx.ack();
+            }
+            String text = event.getText();
+            String userId = event.getUser();
+            String threadTs = event.getTs();
+
+            // Deduplicate per-message
+            String eventKey = channel + ":" + threadTs + ":" + (text != null ? text.hashCode() : 0);
+            if (!processedMessages.add(eventKey)) {
+                return ctx.ack();
+            }
+
+            String cleanedText = text != null ? text.trim() : "";
             mentionExecutor.submit(() -> handleAppMentionInternal(cleanedText, userId, channel, threadTs));
             return ctx.ack();
         });
@@ -122,8 +147,29 @@ public class SlackService {
                 processImportRequest(queryRequest, queryText, extractionResult, channel, threadTs);
                 return; // Do not remove eyes or add check here; background task will manage
             } else {
-                // Route by intent: metrics vs analysis
+                // Guardrail: block irrelevant queries early with a helpful response
+                if (!extractionResult.isRelevant()) {
+                    String msg = "🛑 This request doesn't look related to PMD failure logs or deployments.\n\n" +
+                                 "*Why*: " + (extractionResult.getIrrelevantReason() != null ? extractionResult.getIrrelevantReason() : "Question outside PMD/logs scope.") + "\n" +
+                                 "*Try one of these examples:*\n" +
+                                 "• What went wrong with case 123456?\n" +
+                                 "• Explain SSH_TO_ALL_HOSTS failures from last week\n" +
+                                 "• How many GRIDFORCE_APP_LOG_COPY failures in May 2025?";
+                    sendMessageInThread(channel, msg, ctx, threadTs);
+                    removeReaction(channel, threadTs, "eyes", ctx);
+                    addReaction(channel, threadTs, "no_entry", ctx);
+                    return;
+                }
+                // Route by intent: metrics vs analysis; if intent is null, do not proceed
                 String intent = extractionResult.getIntent();
+                if (intent == null) {
+                    String errorMsg = "❌ *Error*: I couldn't determine whether you want metrics or analysis.\n\n" +
+                                      "*💡 Try phrasing like:* 'How many ...' for counts, or 'Explain ...' for analysis.";
+                    sendMessageInThread(channel, errorMsg, ctx, threadTs);
+                    removeReaction(channel, threadTs, "eyes", ctx);
+                    addReaction(channel, threadTs, "x", ctx);
+                    return;
+                }
                 DatabaseQueryService.DatabaseQueryResult result = databaseQueryService.processNaturalLanguageQuery(queryText, intent);
                 formattedResponse = formatSlackResponseWithResult(result, queryText, extractionResult);
             }
@@ -227,8 +273,10 @@ public class SlackService {
                                            NaturalLanguageProcessingService.ParameterExtractionResult extractionResult) {
         StringBuilder sb = new StringBuilder();
         
-        // Add confidence indicator if using LLM extraction
-        if ("LLM_EXTRACTION".equals(extractionResult.getExtractionMethod()) && extractionResult.getConfidence() < 0.7) {
+        // Add confidence indicator only when confidence is low AND result is weak (to avoid hedging before good answers)
+        boolean lowConfidence = "LLM_EXTRACTION".equals(extractionResult.getExtractionMethod()) && extractionResult.getConfidence() < 0.5;
+        boolean weakResult = result == null || !result.isSuccessful() || result.getResultCount() == 0;
+        if (lowConfidence && weakResult) {
             sb.append("🤔 *I'm not completely sure I understood your query correctly.*\n\n");
         }
         
@@ -238,8 +286,8 @@ public class SlackService {
         
         // Related work items removed from Slack responses
         
-        // Add extracted parameters info for transparency (if low confidence)
-        if (extractionResult.getConfidence() < 0.6) {
+        // Add extracted parameters info for transparency only when confidence is low AND result is weak
+        if (extractionResult.getConfidence() < 0.5 && weakResult) {
             sb.append("\n\n_🔍 I extracted these parameters: ");
             QueryRequest params = extractionResult.getQueryRequest();
             boolean hasParams = false;
@@ -361,52 +409,6 @@ public class SlackService {
             }
         } catch (Exception e) {
             logger.debug("Exception removing reaction '{}' from message: {}", reaction, e.getMessage());
-        }
-    }
-    
-    /**
-     * Extract the actual text response from the LLM Gateway response
-     */
-    private String extractTextFromLlmResponse(String llmResponse) {
-        // The SalesforceLlmGatewayService already handles JSON parsing and returns plain text
-        if (llmResponse == null || llmResponse.trim().isEmpty()) {
-            return "No response received from LLM";
-        }
-        return llmResponse;
-    }
-
-    /**
-     * Update a reaction on a message
-     */
-    private void updateReaction(String channel, String timestamp, String oldEmoji, String newEmoji) {
-        try {
-            // Remove the old reaction first
-            removeReaction(channel, timestamp, oldEmoji, null);
-            
-            // Wait a bit to ensure the removal is processed
-            Thread.sleep(200);
-            
-            // Add the new reaction
-            addReaction(channel, timestamp, newEmoji, null);
-            
-            logger.info("Updated reaction from '{}' to '{}' on message {} in channel {}", 
-                       oldEmoji, newEmoji, timestamp, channel);
-        } catch (Exception e) {
-            logger.error("Failed to update reaction from '{}' to '{}': ", oldEmoji, newEmoji, e);
-        }
-    }
-
-    /**
-     * Send a simple message to a channel
-     */
-    private void sendMessage(String channel, String message) {
-        try {
-            slackApp.client().chatPostMessage(r -> r
-                .channel(channel)
-                .text(message)
-            );
-        } catch (Exception e) {
-            logger.error("Failed to send message to channel {}: ", channel, e);
         }
     }
 }

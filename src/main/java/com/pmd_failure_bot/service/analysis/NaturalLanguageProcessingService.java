@@ -48,8 +48,31 @@ public class NaturalLanguageProcessingService {
                 conversationContext,
                 LocalDate.now().toString()
             );
-            String llmResponse = aiService.generate(extractionPrompt);
+            // Use structured outputs to get strict JSON for extraction
+            java.util.Map<String, Object> schema = new java.util.HashMap<>();
+            schema.put("name", "extracted_parameters");
+            schema.put("strict", true);
+            java.util.Map<String, Object> schemaDef = new java.util.HashMap<>();
+            schemaDef.put("type", "object");
+            java.util.Map<String, Object> properties = new java.util.HashMap<>();
+            properties.put("record_id", java.util.Map.of("type", "string"));
+            properties.put("work_id", java.util.Map.of("type", "string"));
+            properties.put("case_number", java.util.Map.of("type", "integer"));
+            properties.put("step_name", java.util.Map.of("type", "string"));
+            properties.put("attachment_id", java.util.Map.of("type", "string"));
+            properties.put("datacenter", java.util.Map.of("type", "string"));
+            properties.put("report_date", java.util.Map.of("type", "string"));
+            properties.put("query", java.util.Map.of("type", "string"));
+            properties.put("intent", java.util.Map.of("type", "string", "enum", java.util.List.of("import","metrics","analysis")));
+            properties.put("response_mode", java.util.Map.of("type", "string", "enum", java.util.List.of("metrics","analysis")));
+            properties.put("confidence", java.util.Map.of("type", "number", "minimum", 0, "maximum", 1));
+            properties.put("is_relevant", java.util.Map.of("type", "boolean"));
+            properties.put("irrelevant_reason", java.util.Map.of("type", "string"));
+            schemaDef.put("properties", properties);
+            schemaDef.put("additionalProperties", false);
+            schema.put("schema", schemaDef);
 
+            String llmResponse = aiService.generateStructured(extractionPrompt, schema);
             return parseParameterExtractionResponse(llmResponse, naturalLanguageQuery);
 
         } catch (Exception e) {
@@ -100,8 +123,8 @@ public class NaturalLanguageProcessingService {
                 queryRequest.setAttachmentId(responseNode.get("attachment_id").asText());
             }
 
-            if (responseNode.has("hostname") && !responseNode.get("hostname").isNull()) {
-                queryRequest.setDatacenter(responseNode.get("hostname").asText());
+            if (responseNode.has("datacenter") && !responseNode.get("datacenter").isNull()) {
+                queryRequest.setDatacenter(responseNode.get("datacenter").asText());
             }
 
             if (responseNode.has("report_date") && !responseNode.get("report_date").isNull()) {
@@ -123,7 +146,7 @@ public class NaturalLanguageProcessingService {
                 confidence = responseNode.get("confidence").asDouble();
             }
 
-            String intent = "metrics"; // Default intent for queries is metrics
+            String intent = null; // No default; rely on model to choose
             if (responseNode.has("intent") && !responseNode.get("intent").isNull()) {
                 intent = responseNode.get("intent").asText();
             }
@@ -133,7 +156,16 @@ public class NaturalLanguageProcessingService {
                 responseMode = responseNode.get("response_mode").asText();
             }
 
-            return new ParameterExtractionResult(queryRequest, confidence, "LLM_EXTRACTION", intent, responseMode);
+            boolean isRelevant = true;
+            String irrelevantReason = null;
+            if (responseNode.has("is_relevant") && !responseNode.get("is_relevant").isNull()) {
+                isRelevant = responseNode.get("is_relevant").asBoolean(true);
+            }
+            if (responseNode.has("irrelevant_reason") && !responseNode.get("irrelevant_reason").isNull()) {
+                irrelevantReason = responseNode.get("irrelevant_reason").asText();
+            }
+
+            return new ParameterExtractionResult(queryRequest, confidence, "LLM_EXTRACTION", intent, responseMode, isRelevant, irrelevantReason);
 
         } catch (JsonProcessingException e) {
             logger.error("Failed to parse LLM response as JSON: {}", llmResponse, e);
@@ -149,37 +181,39 @@ public class NaturalLanguageProcessingService {
         private final double confidence;
         private final String extractionMethod;
         private final String intent;
+        private final boolean relevant;
+        private final String irrelevantReason;
+        private final String responseMode; // "metrics" or "analysis" for query intent
 
         public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod, String intent) {
-            this.queryRequest = queryRequest;
-            this.confidence = confidence;
-            this.extractionMethod = extractionMethod;
-            this.intent = intent != null ? intent : "query"; // Default to query
-            this.responseMode = null;
+            this(queryRequest, confidence, extractionMethod, intent, null, true, null);
         }
 
         public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod, String intent, String responseMode) {
-            this.queryRequest = queryRequest;
-            this.confidence = confidence;
-            this.extractionMethod = extractionMethod;
-            this.intent = intent != null ? intent : "query";
-            this.responseMode = responseMode;
+            this(queryRequest, confidence, extractionMethod, intent, responseMode, true, null);
         }
 
         public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod) {
+            this(queryRequest, confidence, extractionMethod, null, null, true, null);
+        }
+
+        public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod, String intent, String responseMode, boolean relevant, String irrelevantReason) {
             this.queryRequest = queryRequest;
             this.confidence = confidence;
             this.extractionMethod = extractionMethod;
-            this.intent = "metrics";
-            this.responseMode = null;
+            this.intent = intent;
+            this.responseMode = responseMode;
+            this.relevant = relevant;
+            this.irrelevantReason = irrelevantReason;
         }
 
         public QueryRequest getQueryRequest() { return queryRequest; }
         public double getConfidence() { return confidence; }
         public String getExtractionMethod() { return extractionMethod; }
         public String getIntent() { return intent; }
-        public boolean isImportRequest() { return "import".equalsIgnoreCase(intent); }
-        private final String responseMode; // "metrics" or "analysis" for query intent
+        public boolean isRelevant() { return relevant; }
+        public String getIrrelevantReason() { return irrelevantReason; }
+        public boolean isImportRequest() { return intent != null && "import".equalsIgnoreCase(intent); }
         public String getResponseMode() { return responseMode; }
     }
 }

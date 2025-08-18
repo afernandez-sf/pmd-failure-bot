@@ -14,35 +14,35 @@ public class PromptTemplates {
     public String parameterExtraction(String query, String conversationContext, String currentDate) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("<instructions>\n")
-              .append("You are an expert at extracting structured parameters from natural language queries about deployment failures and PMD logs.\n\n")
-              .append("Extract the following parameters from the user's query and return them as a JSON object:\n")
-              .append("- record_id: Salesforce record identifier (if mentioned)\n")
-              .append("- work_id: GUS work item identifier (if mentioned)\n")
-              .append("- case_number: Support case number (integers only, if mentioned)\n")
-              .append("- step_name: Deployment step name (if mentioned - examples: SSH_TO_ALL_HOSTS, GRIDFORCE_APP_LOG_COPY, KM_VALIDATION_RELENG, CREATE_IR_ORGS_TABLE_PRESTO_TGT)\n")
-              .append("- attachment_id: Salesforce attachment ID (if mentioned)\n")
-              .append("- datacenter: Target datacenter or host suffix (if mentioned)\n")
-              .append("- report_date: Date in YYYY-MM-DD format (if mentioned, including relative dates like \"yesterday\", \"last week\")\n")
-              .append("- query: The refined natural language question to ask about the logs\n")
-              .append("- intent: One of 'import', 'metrics', or 'analysis'\n")
-              .append("- confidence: Your confidence level (0.0 to 1.0) in the parameter extraction\n\n")
+              .append("You extract structured parameters for questions about PMD deployment failures and logs.\n\n")
+              .append("Return a single JSON object with these fields (use null when unknown):\n")
+              .append("- record_id (string)\n")
+              .append("- work_id (string)\n")
+              .append("- case_number (integer)\n")
+              .append("- step_name (string; e.g., SSH_TO_ALL_HOSTS, GRIDFORCE_APP_LOG_COPY)\n")
+              .append("- attachment_id (string)\n")
+              .append("- datacenter (string)\n")
+              .append("- report_date (YYYY-MM-DD)\n")
+              .append("- query (string; the core question with parameters removed)\n")
+              .append("- intent (string; one of: import, metrics, analysis)\n")
+              .append("- response_mode (string; one of: metrics, analysis; optional)\n")
+              .append("- confidence (number 0.0–1.0)\n")
+              .append("- is_relevant (boolean; true if about PMD/logs/deployments)\n")
+              .append("- irrelevant_reason (string; short reason when is_relevant=false)\n\n")
               .append("Guidelines:\n")
-              .append("1. Only extract parameters that are explicitly mentioned or strongly implied\n")
-              .append("2. For dates, convert relative terms to actual dates (today is ").append(currentDate).append(")\n")
-              .append("3. For step names, match partial names to known patterns (e.g., \"SSH\" -> \"SSH_TO_ALL_HOSTS\")\n")
-              .append("4. For case numbers, extract only numeric values\n")
-              .append("5. The query field should be the main question being asked, cleaned of parameter information\n")
-              .append("6. For intent: \n")
-              .append("   - 'import' for requests to fetch/import/pull/download logs\n")
-              .append("   - 'metrics' for counts, breakdowns, or trends over time\n")
-              .append("   - 'analysis' to explain errors, root cause, or analyze logs\n")
-              .append("7. Set confidence based on how clearly the parameters were stated\n")
-              .append("8. If no parameters are found, return null for those fields\n")
-              .append("9. Return ONLY valid JSON, no other text\n\n")
+              .append("1) Extract only what is stated or strongly implied.\n")
+              .append("2) Resolve relative dates to actual dates (today: ").append(currentDate).append(").\n")
+              .append("3) Normalize partial step names to canonical names when clear.\n")
+              .append("4) Case numbers are integers; strip non-digits.\n")
+              .append("5) For intent: 'import' = fetch logs, 'metrics' = counts/breakdowns/trends, 'analysis' = explain errors/root cause.\n")
+              .append("6) If the user asks to 'explain' or 'why', prefer intent=analysis. For 'how many' or 'count', prefer metrics.\n")
+              .append("7) Always include intent; set confidence based on clarity.\n")
+              .append("8) If not about PMD/logs/deployments, set is_relevant=false and give a brief irrelevant_reason.\n")
+              .append("9) Return ONLY JSON, no extra text.\n\n")
               .append("Example query: \"What went wrong with case 123456's SSH deployment yesterday?\"\n")
-              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"datacenter\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"analysis\", \"confidence\": 0.9}\n\n")
+              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"datacenter\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"analysis\", \"response_mode\": \"analysis\", \"confidence\": 0.9, \"is_relevant\": true, \"irrelevant_reason\": null}\n\n")
               .append("Example import: \"Import logs for case 567890\"\n")
-              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 567890, \"step_name\": null, \"attachment_id\": null, \"datacenter\": null, \"report_date\": null, \"query\": \"Import logs\", \"intent\": \"import\", \"confidence\": 0.95}\n")
+              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 567890, \"step_name\": null, \"attachment_id\": null, \"datacenter\": null, \"report_date\": null, \"query\": \"Import logs\", \"intent\": \"import\", \"confidence\": 0.95, \"is_relevant\": true, \"irrelevant_reason\": null}\n")
               .append("</instructions>\n\n");
 
         if (conversationContext != null && !conversationContext.trim().isEmpty()) {
@@ -59,23 +59,20 @@ public class PromptTemplates {
     }
 
     /**
-     * Creates a prompt for generating natural language summaries of query results
+     * Metrics summary prompt (counts, breakdowns, trends) for Slack-ready answers
      */
     public String nlSummary(String originalQuery, String sql, String formattedResults, int resultCount) {
         return String.format(
             "<instructions>\n" +
-            "You are an expert database analyst specialized in analyzing PMD deployment failure logs. Review the database results inside <context></context> XML tags, and answer the question inside <question></question> XML tags.\n\n" +
-            "Context structure: You are given a compact data summary and a small JSON blob. Use them to compute numbers, but DO NOT mention internal data structure names (JSON, tables, columns, field names, or SQL) in your answer. Keep answers short for Slack.\n\n" +
-            "Rules for answering:\n" +
-            "- If the user asks for counts (e.g., 'how many', 'number of', 'count'), compute totals from the machine-readable data, not from the number of rows shown.\n" +
-            "  * If there are per-group counts (e.g., counts by day or by step), sum those values to produce totals.\n" +
-            "  * Provide a concise breakdown (e.g., by step) when the user asks for \"different failures\". Keep answers short and conversational for Slack.\n" +
-            "- Provide concise answers; for pure counts, respond with the exact number and a short clarification (e.g., '11 GRIDFORCE_APP_LOG_COPY failures in May 2025').\n" +
-            "- For analysis questions, summarize patterns in plain language and avoid referencing internal data structure names.\n" +
-            "- Do NOT infer counts from the number of rows; a single row may represent an aggregate across many items.\n" +
-            "- Do NOT include next steps, follow-ups, suggestions, or requests for more data. Only answer the question asked.\n" +
-            "- Provide your answer in plain text, without any formatting.\n" +
-            "- Respond 'Insufficient data to determine root cause.' if the logs don't contain enough information.\n" +
+            "You answer metrics questions about PMD failure logs for Slack. Use the data in <context> to answer the <question>.\n\n" +
+            "Output (plain text):\n" +
+            "- Line 1: Direct numeric total with scope (include step/date/datacenter if present).\n" +
+            "- Following lines: Provide a breakdown using the most informative dimensions present in the data and relevant to the question (e.g., step_name, report_date, datacenter, case_number, work_id, hostname).\n" +
+            "- If there is no matching data, output exactly: No matching data found.\n\n" +
+            "Rules:\n" +
+            "- Compute totals from the aggregates in the data, not from number of rows.\n" +
+            "- Avoid internal details (SQL, column names, JSON keys).\n" +
+            "- Do not invent filters or ranges not present in the question or data.\n" +
             "</instructions>\n\n" +
             "<context>\n" +
             "SQL Query: %s\n\n" +
@@ -92,20 +89,21 @@ public class PromptTemplates {
     }
 
     /**
-     * Creates a prompt for explaining errors from log content (analysis mode)
+     * Analysis prompt (explain errors/root cause) for Slack-ready answers
      */
     public String nlErrorSummary(String originalQuery, String sql, String formattedResults, int resultCount) {
         return String.format(
             "<instructions>\n" +
-            "You are an expert in diagnosing deployment failures. Read the provided context and explain the likely causes and key error messages in plain language.\n\n" +
-            "Guidelines:\n" +
-            "- Focus on the most informative error lines and patterns (fatal, exception, timeout, denied/refused, connection errors).\n" +
-            "- Group similar issues together; avoid listing many near-duplicates.\n" +
-            "- Reference the step and date when helpful, but do not mention internal implementation details.\n" +
-            "- Keep the answer short and actionable for Slack.\n" +
-            "- Include a short list of links to the work items used in your analysis when IDs are present. Use the work ID as the link text, and the URL as https://gus.lightning.force.com/lightning/r/ADM_Work__c/{record_id}/view (format: <https://gus.lightning.force.com/lightning/r/ADM_Work__c/{record_id}/view|{work_id}>).\n" +
-            "- If the data is insufficient, say so briefly.\n" +
-            "- Do NOT include next steps, follow-ups, suggestions, troubleshooting checklists, or requests for additional information. Only explain what happened and the likely causes.\n" +
+            "You explain PMD failure logs in plain language for Slack. Use the data in <context> to answer the <question>.\n\n" +
+            "Output structure (exactly this order):\n" +
+            "1) Paragraph 1 — Concise summary (1–3 sentences) of what happened, including step and date if available.\n" +
+            "2) Paragraph 2 — Key error lines and patterns: concisely describe 2–6 of the most relevant error messages/patterns in plain language along with short direct quotes (e.g., refused execution due to invalid state; connection timed out). No bullets, no quotes.\n" +
+            "3) Paragraph 3 — Diagnosis: likely cause(s), scope, and any notable contributing factors. No action items.\n" +
+            "Then, on new lines, end with a list titled 'Work items:' followed by one item per line using this exact link format when record_id and work_id are present: <https://gus.lightning.force.com/lightning/r/ADM_Work__c/{record_id}/view|{work_id}>.\n\n" +
+            "Style rules:\n" +
+            "- Plain text only (no markdown headings).\n" +
+            "- Avoid internal implementation details and SQL/column names.\n" +
+            "- If evidence is insufficient, say: 'Insufficient data to determine root cause.'\n" +
             "</instructions>\n\n" +
             "<context>\n" +
             "SQL Query: %s\n\n" +

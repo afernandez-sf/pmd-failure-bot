@@ -18,6 +18,11 @@ public interface AIService {
     FunctionCallResponse generateWithFunctions(String userMessage, List<Map<String, Object>> tools) throws Exception;
 
     /**
+     * Generate a strictly structured JSON string according to the provided JSON schema
+     */
+    String generateStructured(String prompt, Map<String, Object> jsonSchema) throws Exception;
+
+    /**
      * Response class for function calling operations
      */
     class FunctionCallResponse {

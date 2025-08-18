@@ -95,6 +95,7 @@ public class DatabaseQueryService {
         Map<String, Object> metricsFn = new java.util.HashMap<>();
         metricsFn.put("name", "metrics_pmd_logs");
         metricsFn.put("description", "Generate a read-only SELECT for counts, breakdowns, and trends over pmd_failure_logs. Prefer GROUP BY step_name (and/or report_date) when the user asks about different failures or a breakdown. Include an aggregated numeric column (e.g., COUNT(*) AS failures). Do NOT select the heavy 'content' column. Use LIMIT <= 500.");
+        metricsFn.put("strict", true);
         Map<String, Object> metricsParams = new java.util.HashMap<>();
         metricsParams.put("type", "object");
         Map<String, Object> metricsProps = new java.util.HashMap<>();
@@ -104,6 +105,7 @@ public class DatabaseQueryService {
         metricsProps.put("sql_query", metricsSql);
         metricsParams.put("properties", metricsProps);
         metricsParams.put("required", java.util.List.of("sql_query"));
+        metricsParams.put("additionalProperties", false);
         metricsFn.put("parameters", metricsParams);
         metricsTool.put("function", metricsFn);
 
@@ -112,6 +114,7 @@ public class DatabaseQueryService {
         Map<String, Object> analysisFn = new java.util.HashMap<>();
         analysisFn.put("name", "analyze_pmd_logs");
         analysisFn.put("description", "Generate a read-only SELECT to fetch representative failure logs (including 'content') for explanatory analysis. Select fields: record_id, work_id, step_name, case_number, datacenter, report_date, content. Filter by step_name/date/case when provided. Order by recency or relevance. LIMIT <= 10.");
+        analysisFn.put("strict", true);
         Map<String, Object> analysisParams = new java.util.HashMap<>();
         analysisParams.put("type", "object");
         Map<String, Object> analysisProps = new java.util.HashMap<>();
@@ -121,6 +124,7 @@ public class DatabaseQueryService {
         analysisProps.put("sql_query", analysisSql);
         analysisParams.put("properties", analysisProps);
         analysisParams.put("required", java.util.List.of("sql_query"));
+        analysisParams.put("additionalProperties", false);
         analysisFn.put("parameters", analysisParams);
         analysisTool.put("function", analysisFn);
         return java.util.List.of(metricsTool, analysisTool);

@@ -177,9 +177,24 @@ public class SalesforceLlmGatewayService {
         // Add tools
         requestPayload.put("tools", tools);
         
-        // Tool configuration - force the model to use tools
+        // Tool configuration - require model to use one of the provided tools (no plain text content)
         Map<String, Object> toolConfig = new HashMap<>();
-        toolConfig.put("mode", "auto"); // Let model decide when to use tools
+        toolConfig.put("mode", "any");
+        // Build allowed_tools from provided tool definitions
+        List<Map<String, Object>> allowedTools = new java.util.ArrayList<>();
+        for (Map<String, Object> tool : tools) {
+            Object fnObj = tool.get("function");
+            if (fnObj instanceof Map) {
+                Object nameObj = ((Map<?, ?>) fnObj).get("name");
+                if (nameObj != null) {
+                    Map<String, Object> allowed = new HashMap<>();
+                    allowed.put("type", "function");
+                    allowed.put("name", String.valueOf(nameObj));
+                    allowedTools.add(allowed);
+                }
+            }
+        }
+        toolConfig.put("allowed_tools", allowedTools);
         requestPayload.put("tool_config", toolConfig);
         
         requestPayload.put("model", config.getModel());
@@ -226,6 +241,82 @@ public class SalesforceLlmGatewayService {
                     logger.error("Request payload: {}", jsonPayload);
                     logger.error("Response body: {}", responseBody);
                     throw new RuntimeException("Function calling request failed: " + response.getCode() + " " + response.getReasonPhrase() + ". Response: " + responseBody);
+                }
+            });
+        }
+    }
+
+    /**
+     * Generate a strictly structured JSON response using Structured Outputs (response_format)
+     */
+    public String generateStructuredJson(String prompt, Map<String, Object> jsonSchema) throws Exception {
+        config.validate();
+
+        logger.info("Sending structured output request to Salesforce LLM Gateway...");
+
+        Map<String, Object> requestPayload = new HashMap<>();
+        requestPayload.put("model", config.getModel());
+        // Use messages array for chat/generations endpoint
+        Map<String, Object> userMsg = new HashMap<>();
+        userMsg.put("role", "user");
+        userMsg.put("content", prompt);
+        requestPayload.put("messages", List.of(userMsg));
+
+        Map<String, Object> generationSettings = new HashMap<>();
+        generationSettings.put("max_tokens", config.getMaxTokens());
+        generationSettings.put("temperature", config.getTemperature());
+        requestPayload.put("generation_settings", generationSettings);
+
+        Map<String, Object> parameters = new HashMap<>();
+        Map<String, Object> responseFormat = new HashMap<>();
+        responseFormat.put("type", "json_schema");
+        Map<String, Object> jsonSchemaWrapper = new HashMap<>();
+        // Expect caller to set name/strict/schema
+        jsonSchemaWrapper.putAll(jsonSchema);
+        responseFormat.put("json_schema", jsonSchemaWrapper);
+        parameters.put("response_format", responseFormat);
+        requestPayload.put("parameters", parameters);
+
+        String jsonPayload = objectMapper.writeValueAsString(requestPayload);
+        logger.debug("Structured output request payload: {}", jsonPayload);
+
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            String endpoint = config.getGatewayUrl() + "/v1.0/chat/generations";
+            HttpPost request = new HttpPost(endpoint);
+            request.setHeader("Content-Type", "application/json");
+            request.setHeader("X-LLM-Provider", config.getLlmProvider());
+            request.setHeader("X-Org-Id", config.getOrgId());
+            request.setHeader("Authorization", config.getAuthScheme() + " " + config.getAuthToken());
+            request.setHeader("x-sfdc-core-tenant-id", config.getTenantId());
+            if (config.getClientFeatureId() != null && !config.getClientFeatureId().isEmpty()) {
+                request.setHeader("x-client-feature-id", config.getClientFeatureId());
+            }
+            request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
+
+            return httpClient.execute(request, response -> {
+                String responseBody = new String(response.getEntity().getContent().readAllBytes());
+                if (response.getCode() >= 200 && response.getCode() < 300) {
+                    JsonNode responseJson = objectMapper.readTree(responseBody);
+                    JsonNode generationDetails = responseJson.get("generation_details");
+                    if (generationDetails != null && generationDetails.has("generations")) {
+                        JsonNode gens = generationDetails.get("generations");
+                        if (gens.isArray() && gens.size() > 0) {
+                            JsonNode first = gens.get(0);
+                            if (first.has("content")) {
+                                return first.get("content").asText();
+                            }
+                            if (first.has("text")) {
+                                return first.get("text").asText();
+                            }
+                        }
+                    }
+                    // Fallback to raw body when unknown
+                    logger.warn("Unable to parse structured output response; returning raw body");
+                    return responseBody;
+                } else {
+                    logger.error("Structured output request failed: {} {}", response.getCode(), response.getReasonPhrase());
+                    logger.error("Response body: {}", responseBody);
+                    throw new RuntimeException("Structured output request failed: " + response.getCode() + " " + response.getReasonPhrase());
                 }
             });
         }

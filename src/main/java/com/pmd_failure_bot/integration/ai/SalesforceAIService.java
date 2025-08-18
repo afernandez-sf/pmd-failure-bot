@@ -1,6 +1,5 @@
 package com.pmd_failure_bot.integration.ai;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pmd_failure_bot.integration.salesforce.SalesforceLlmGatewayService;
 
 import org.springframework.stereotype.Service;
@@ -15,7 +14,7 @@ import java.util.Map;
 public class SalesforceAIService implements AIService {
 
     private final SalesforceLlmGatewayService gatewayService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    // Removed unused ObjectMapper
 
     public SalesforceAIService(SalesforceLlmGatewayService gatewayService) {
         this.gatewayService = gatewayService;
@@ -33,5 +32,10 @@ public class SalesforceAIService implements AIService {
             return FunctionCallResponse.forCall(res.getFunctionName(), res.getArguments(), res.getInvocationId());
         }
         return FunctionCallResponse.forContent(res.getContent());
+    }
+
+    @Override
+    public String generateStructured(String prompt, Map<String, Object> jsonSchema) throws Exception {
+        return gatewayService.generateStructuredJson(prompt, jsonSchema);
     }
 }
