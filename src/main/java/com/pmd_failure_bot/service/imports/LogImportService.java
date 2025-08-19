@@ -2,10 +2,9 @@ package com.pmd_failure_bot.service.imports;
 
 import com.pmd_failure_bot.web.dto.request.LogImportRequest;
 import com.pmd_failure_bot.web.dto.response.LogImportResponse;
-import com.pmd_failure_bot.data.entity.PmdReport;
 import com.pmd_failure_bot.data.repository.PmdReportRepository;
 import com.pmd_failure_bot.integration.salesforce.SalesforceService;
-import com.pmd_failure_bot.util.StepNameNormalizer;
+import com.pmd_failure_bot.common.util.StepNameNormalizer;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,7 +36,6 @@ public class LogImportService {
     private final StepNameNormalizer stepNameNormalizer;
 
     public ResponseEntity<LogImportResponse> importLogs(LogImportRequest request) {
-        long startTime = System.currentTimeMillis();
         log.info("Starting log import for request: {}", request);
         
         try {
@@ -49,14 +47,14 @@ public class LogImportService {
                 log.info("No failed attachments found for {}", searchCriteria);
                 return ResponseEntity.ok(new LogImportResponse(
                     "No failed attachments found for " + searchCriteria,
-                    0, 0, 0, 0, 0, List.of(), System.currentTimeMillis() - startTime
+                    0, 0, 0, 0, 0, List.of()
                 ));
             }
             
             List<AttachmentInfo> attachments = collectAttachments(request, salesforceRecords);
             Set<String> alreadyProcessedIds = computeAlreadyProcessedIds(attachments);
             ExecutionAggregation aggregation = processAttachments(attachments, alreadyProcessedIds);
-            LogImportResponse response = buildResponse(searchCriteria, aggregation, startTime);
+            LogImportResponse response = buildResponse(searchCriteria, aggregation);
             
             log.info("Log import completed successfully for {}: {} total attachments, {} processed", 
                     searchCriteria, aggregation.totalAttachments, aggregation.processedAttachments);
@@ -66,14 +64,14 @@ public class LogImportService {
             log.error("Invalid request for log import: {}", e.getMessage());
             LogImportResponse errorResponse = new LogImportResponse(
                 "Error: " + e.getMessage(),
-                0, 0, 0, 0, 0, List.of(), System.currentTimeMillis() - startTime
+                0, 0, 0, 0, 0, List.of()
             );
             return ResponseEntity.badRequest().body(errorResponse);
         } catch (Exception e) {
             log.error("Internal server error during log import", e);
             LogImportResponse errorResponse = new LogImportResponse(
                 "Internal server error: " + e.getMessage(),
-                0, 0, 0, 0, 0, List.of(), System.currentTimeMillis() - startTime
+                0, 0, 0, 0, 0, List.of()
             );
             return ResponseEntity.internalServerError().body(errorResponse);
         }
@@ -132,9 +130,7 @@ public class LogImportService {
         List<String> attachmentIds = attachments.stream()
                 .map(AttachmentInfo::attachmentId)
                 .collect(Collectors.toList());
-        return pmdReportRepository.findByAttachmentIdIn(attachmentIds).stream()
-                .map(PmdReport::getAttachmentId)
-                .collect(Collectors.toSet());
+        return Set.copyOf(pmdReportRepository.findExistingAttachmentIds(attachmentIds));
     }
 
     private ExecutionAggregation processAttachments(List<AttachmentInfo> attachments, Set<String> alreadyProcessedIds) throws Exception {
@@ -221,8 +217,7 @@ public class LogImportService {
         return agg;
     }
 
-    private LogImportResponse buildResponse(String searchCriteria, ExecutionAggregation agg, long startTime) {
-        long executionTime = System.currentTimeMillis() - startTime;
+    private LogImportResponse buildResponse(String searchCriteria, ExecutionAggregation agg) {
         String message = String.format(
             "Import completed for %s. Processed %d attachments, skipped %d, imported %d logs successfully, %d failed.",
             searchCriteria, agg.processedAttachments, agg.skippedAttachments, agg.successfulLogs, agg.failedLogs
@@ -234,8 +229,7 @@ public class LogImportService {
             agg.skippedAttachments,
             agg.successfulLogs,
             agg.failedLogs,
-            agg.processedRecords,
-            executionTime
+            agg.processedRecords
         );
     }
 

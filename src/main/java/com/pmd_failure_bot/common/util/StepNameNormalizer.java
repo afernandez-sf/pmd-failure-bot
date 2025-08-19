@@ -1,4 +1,4 @@
-package com.pmd_failure_bot.util;
+package com.pmd_failure_bot.common.util;
 
 import com.pmd_failure_bot.data.repository.StepNameRepository;
 import lombok.RequiredArgsConstructor;

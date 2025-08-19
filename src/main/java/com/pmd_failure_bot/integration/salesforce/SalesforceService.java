@@ -1,7 +1,7 @@
 package com.pmd_failure_bot.integration.salesforce;
 
 import com.pmd_failure_bot.config.SalesforceConfig;
-import com.pmd_failure_bot.util.StepNameNormalizer;
+import com.pmd_failure_bot.common.util.StepNameNormalizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.hc.client5.http.classic.methods.HttpGet;

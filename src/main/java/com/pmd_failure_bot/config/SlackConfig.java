@@ -10,6 +10,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import jakarta.annotation.PostConstruct;
+
 @Data
 @Configuration
 @ConfigurationProperties(prefix = "slack")
@@ -18,21 +20,25 @@ public class SlackConfig {
     private static final Logger logger = LoggerFactory.getLogger(SlackConfig.class);
 
     private String botToken;
-    private String appToken;
+    private String appToken; 
     private String signingSecret;
+
+    @PostConstruct
+    public void validateConfiguration() {
+        if (botToken == null || botToken.trim().isEmpty()) {
+            throw new IllegalStateException("SLACK_BOT_TOKEN is required but not configured");
+        }
+        if (appToken == null || appToken.trim().isEmpty()) {
+            throw new IllegalStateException("SLACK_APP_TOKEN is required but not configured");
+        }
+        if (signingSecret == null || signingSecret.trim().isEmpty()) {
+            logger.warn("SLACK_SIGNING_SECRET is not configured - this may cause signature verification issues");
+        }
+        logger.info("Slack configuration validated successfully");
+    }
 
     @Bean
     public App slackApp() {
-        if (botToken == null || botToken.trim().isEmpty()) {
-            logger.error("SLACK_BOT_TOKEN is not configured. Slack integration will be disabled.");
-            return null;
-        }
-        
-        if (appToken == null || appToken.trim().isEmpty()) {
-            logger.error("SLACK_APP_TOKEN is not configured. Slack integration will be disabled.");
-            return null;
-        }
-
         try {
             AppConfig appConfig = AppConfig.builder().singleTeamBotToken(botToken).signingSecret(signingSecret).build();
             App app = new App(appConfig);
@@ -40,17 +46,12 @@ public class SlackConfig {
             return app;
         } catch (Exception e) {
             logger.error("Failed to configure Slack app: ", e);
-            return null;
+            throw new IllegalStateException("Failed to initialize Slack app", e);
         }
     }
 
     @Bean
     public SocketModeApp socketModeApp(App slackApp) {
-        if (appToken == null || appToken.trim().isEmpty()) {
-            logger.warn("Socket mode is disabled due to missing SLACK_APP_TOKEN");
-            return null;
-        }
-
         try {
             SocketModeApp socketModeApp = new SocketModeApp(appToken, slackApp);
             
@@ -68,7 +69,7 @@ public class SlackConfig {
             
         } catch (Exception e) {
             logger.error("Failed to create Socket Mode app: ", e);
-            return null;
+            throw new IllegalStateException("Failed to initialize Slack Socket Mode", e);
         }
     }
 }

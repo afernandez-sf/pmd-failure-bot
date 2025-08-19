@@ -1,12 +1,11 @@
 package com.pmd_failure_bot;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.pmd_failure_bot.config.ApplicationConfig;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.context.annotation.Import;
-import com.pmd_failure_bot.config.ApplicationConfig;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 /**
  * Main application class for PMD Failure Bot
@@ -14,31 +13,44 @@ import com.pmd_failure_bot.config.ApplicationConfig;
 @SpringBootApplication
 @EnableJpaRepositories(basePackages = "com.pmd_failure_bot.data.repository")
 @Import(ApplicationConfig.class)
+@Slf4j
 public class PmdFailureBotApplication {
 
-	private static final Logger logger = LoggerFactory.getLogger(PmdFailureBotApplication.class);
+	private static final String SLACK_BOT_TOKEN = "SLACK_BOT_TOKEN";
+	private static final String SLACK_APP_TOKEN = "SLACK_APP_TOKEN";
 
 	public static void main(String[] args) {
-		logger.info("Starting PMD Failure Bot with Slack integration...");
+		log.info("Starting PMD Failure Bot with Slack integration...");
 		
-		// Check for required Slack environment variables
-		String botToken = System.getenv("SLACK_BOT_TOKEN");
-		String appToken = System.getenv("SLACK_APP_TOKEN");
-		
-		if (botToken == null || botToken.trim().isEmpty()) {
-			logger.warn("SLACK_BOT_TOKEN environment variable is not set. Slack integration will be disabled.");
-		}
-		
-		if (appToken == null || appToken.trim().isEmpty()) {
-			logger.warn("SLACK_APP_TOKEN environment variable is not set. Socket mode will be disabled.");
-		}
-		
-		if (botToken != null && appToken != null && !botToken.trim().isEmpty() && !appToken.trim().isEmpty()) {
-			logger.info("Slack tokens detected. Slack integration will be enabled.");
-		}
+		validateSlackTokens();
 		
 		SpringApplication.run(PmdFailureBotApplication.class, args);
 		
-		logger.info("PMD Failure Bot started successfully. Ready to receive requests!");
+		log.info("PMD Failure Bot started successfully. Ready to receive requests!");
+	}
+
+	private static void validateSlackTokens() {
+		String botToken = System.getenv(SLACK_BOT_TOKEN);
+		String appToken = System.getenv(SLACK_APP_TOKEN);
+		
+		if (isTokenMissing(botToken)) {
+			log.warn("{} environment variable is not set. Slack integration will be disabled.", SLACK_BOT_TOKEN);
+		}
+		
+		if (isTokenMissing(appToken)) {
+			log.warn("{} environment variable is not set. Socket mode will be disabled.", SLACK_APP_TOKEN);
+		}
+		
+		if (areTokensValid(botToken, appToken)) {
+			log.info("Slack tokens detected. Slack integration will be enabled.");
+		}
+	}
+
+	private static boolean isTokenMissing(String token) {
+		return token == null || token.trim().isEmpty();
+	}
+
+	private static boolean areTokensValid(String botToken, String appToken) {
+		return !isTokenMissing(botToken) && !isTokenMissing(appToken);
 	}
 }

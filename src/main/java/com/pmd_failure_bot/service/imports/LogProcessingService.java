@@ -6,7 +6,7 @@ import com.pmd_failure_bot.data.repository.PmdReportRepository;
 import com.pmd_failure_bot.integration.salesforce.SalesforceService;
 import com.pmd_failure_bot.service.analysis.ErrorAnalyzer;
 import com.pmd_failure_bot.service.imports.extract.TarGzExtractorStrategy;
-import com.pmd_failure_bot.util.StepNameNormalizer;
+import com.pmd_failure_bot.common.util.StepNameNormalizer;
 
 import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;

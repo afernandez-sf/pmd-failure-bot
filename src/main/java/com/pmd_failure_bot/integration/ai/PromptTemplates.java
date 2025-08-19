@@ -97,7 +97,7 @@ public class PromptTemplates {
             "You explain PMD failure logs in plain language for Slack. Use the data in <context> to answer the <question>.\n\n" +
             "Output structure (exactly this order):\n" +
             "1) Paragraph 1 — Concise summary (1–3 sentences) of what happened, including step and date if available.\n" +
-            "2) Paragraph 2 — Key error lines and patterns: concisely describe 2–6 of the most relevant error messages/patterns in plain language along with short direct quotes (e.g., refused execution due to invalid state; connection timed out). No bullets, no quotes.\n" +
+            "2) Key error lines and patterns: provide a bulleted list of 2–6 of the most relevant error messages/patterns, each with a brief description in plain language and short direct quotes (e.g., • Connection timeout - 'connection timed out after 30 seconds').\n" +
             "3) Paragraph 3 — Diagnosis: likely cause(s), scope, and any notable contributing factors. No action items.\n" +
             "Then, on new lines, end with a list titled 'Work items:' followed by one item per line using this exact link format when record_id and work_id are present: <https://gus.lightning.force.com/lightning/r/ADM_Work__c/{record_id}/view|{work_id}>.\n\n" +
             "Style rules:\n" +

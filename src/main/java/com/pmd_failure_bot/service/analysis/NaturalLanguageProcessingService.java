@@ -13,8 +13,8 @@ import org.springframework.stereotype.Service;
 
 import com.pmd_failure_bot.integration.ai.AIService;
 import com.pmd_failure_bot.integration.ai.PromptTemplates;
-import com.pmd_failure_bot.util.JsonUtils;
-import com.pmd_failure_bot.util.StepNameNormalizer;
+import com.pmd_failure_bot.common.util.JsonUtils;
+import com.pmd_failure_bot.common.util.StepNameNormalizer;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;

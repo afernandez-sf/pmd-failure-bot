@@ -41,7 +41,6 @@ public class PmdReport {
     @Column(name = "report_date")
     private LocalDate reportDate;
 
-
     public String getContent() {
         if (content == null || content.length == 0) return "";
         try {

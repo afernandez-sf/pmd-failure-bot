@@ -54,7 +54,7 @@ public class DatabaseQueryService {
         if (response.isFunctionCall() && isValidFunctionName(response.getFunctionName())) {
             JsonNode args = objectMapper.readTree(response.getArguments());
             String sql = args.get("sql_query").asText();
-            log.info("🔍 FUNCTION CALLING SUCCESS! Generated SQL query: {}", sql);
+            log.info("Function calling success! Generated SQL query: {}", sql);
             
             if (isValidReadOnlyQuery(sql)) {
                 List<Map<String, Object>> results = jdbcTemplate.queryForList(sql);

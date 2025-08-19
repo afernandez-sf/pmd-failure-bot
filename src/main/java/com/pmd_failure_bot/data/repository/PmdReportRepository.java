@@ -11,9 +11,10 @@ import java.util.List;
 @Repository
 public interface PmdReportRepository extends JpaRepository<PmdReport, Long> {
 
-    List<PmdReport> findByAttachmentIdIn(List<String> attachmentIds);
-
     boolean existsByAttachmentId(String attachmentId);
+
+    @Query("SELECT p.attachmentId FROM PmdReport p WHERE p.attachmentId IN :attachmentIds")
+    List<String> findExistingAttachmentIds(@Param("attachmentIds") List<String> attachmentIds);
 }
 
 

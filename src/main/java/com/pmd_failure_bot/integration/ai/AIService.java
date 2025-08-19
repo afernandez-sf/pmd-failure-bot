@@ -35,11 +35,11 @@ public interface AIService {
         private final String invocationId;
         private final String content;
 
-        public static FunctionCallResponse forCall(String functionName, String arguments, String invocationId) {
+        protected static FunctionCallResponse forCall(String functionName, String arguments, String invocationId) {
             return new FunctionCallResponse(true, functionName, arguments, invocationId, null);
         }
 
-        public static FunctionCallResponse forContent(String content) {
+        protected static FunctionCallResponse forContent(String content) {
             return new FunctionCallResponse(false, null, null, null, content);
         }
 

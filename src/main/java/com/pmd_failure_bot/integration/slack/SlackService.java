@@ -1,49 +1,41 @@
 package com.pmd_failure_bot.integration.slack;
 
-import com.pmd_failure_bot.web.dto.request.LogImportRequest;
-import com.pmd_failure_bot.web.dto.response.LogImportResponse;
 import com.pmd_failure_bot.web.dto.request.QueryRequest;
 import com.pmd_failure_bot.service.analysis.NaturalLanguageProcessingService;
-import com.pmd_failure_bot.service.imports.LogImportService;
 import com.pmd_failure_bot.service.query.DatabaseQueryService;
+import com.pmd_failure_bot.common.constants.SlackConstants;
+import com.pmd_failure_bot.common.constants.ErrorMessages;
 import com.slack.api.bolt.App;
-import com.slack.api.bolt.context.builtin.EventContext;
 import com.slack.api.model.event.AppMentionEvent;
 import com.slack.api.model.event.MessageEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseEntity;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * Service for Slack messaging and interactions
  */
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class SlackService {
 
-    private static final Logger logger = LoggerFactory.getLogger(SlackService.class);
+
     private final NaturalLanguageProcessingService nlpService;
     private final DatabaseQueryService databaseQueryService;
     private final App slackApp;
-    private final LogImportService logImportService;
+    private final SlackImportHandler slackImportHandler;
+    private final SlackReactionService slackReactionService;
     
     // Cache to prevent duplicate processing of the same message
     private final java.util.Set<String> processedMessages = java.util.concurrent.ConcurrentHashMap.newKeySet();
     // Executor to process mentions concurrently
-    private final java.util.concurrent.ExecutorService mentionExecutor = java.util.concurrent.Executors.newFixedThreadPool(12);
+    private final java.util.concurrent.ExecutorService mentionExecutor = java.util.concurrent.Executors.newFixedThreadPool(SlackConstants.THREAD_POOL_SIZE);
 
-    @Value("${slack.bot.channel:pmd-slack-bot}")
-    private String botChannelName;
 
-    @Autowired
-    public SlackService(NaturalLanguageProcessingService nlpService, DatabaseQueryService databaseQueryService, App slackApp,
-                       LogImportService logImportService) {
-        this.nlpService = nlpService;
-        this.databaseQueryService = databaseQueryService;
-        this.slackApp = slackApp;
-        this.logImportService = logImportService;
+    // Initialize handlers via @PostConstruct to ensure proper bean initialization
+    @jakarta.annotation.PostConstruct
+    private void initialize() {
         initializeSlackHandlers();
     }
 
@@ -66,7 +58,7 @@ public class SlackService {
             }
 
             // Clean text and schedule processing without blocking ACK
-            String cleanedText = text != null ? text.replaceAll("<@[A-Z0-9]+>", "").trim() : "";
+            String cleanedText = text != null ? text.replaceAll(SlackConstants.MENTION_PATTERN, "").trim() : "";
             mentionExecutor.submit(() -> handleAppMentionInternal(cleanedText, userId, channel, threadTs));
             return ctx.ack();
         });
@@ -80,7 +72,7 @@ public class SlackService {
             }
             String channel = event.getChannel();
             // Only process direct messages (IM channels start with 'D')
-            if (channel == null || !channel.startsWith("D")) {
+            if (channel == null || !channel.startsWith(SlackConstants.DIRECT_MESSAGE_CHANNEL_PREFIX)) {
                 return ctx.ack();
             }
             String text = event.getText();
@@ -105,19 +97,14 @@ public class SlackService {
     private void handleAppMentionInternal(String cleanedText, String userId, String channel, String threadTs) {
         try {
             if (cleanedText == null || cleanedText.isBlank()) return;
-            logger.info("Received mention from user {} in channel {}: {}", userId, channel, cleanedText);
+            log.info("Received mention from user {} in channel {}: {}", userId, channel, cleanedText);
             processQueryAndRespond(cleanedText, channel, null, userId, threadTs);
         } catch (Exception e) {
-            logger.error("Error handling app mention: ", e);
+            log.error("Error handling app mention: ", e);
             try {
-                // Fallback to app client
-                slackApp.client().chatPostMessage(r -> r
-                    .channel(channel)
-                    .threadTs(threadTs)
-                    .text("❌ Sorry, I encountered an error processing your request. Please try again later.")
-                );
+                slackApp.client().chatPostMessage(r -> r.channel(channel).threadTs(threadTs).text(ErrorMessages.GENERIC_ERROR_MESSAGE));
             } catch (Exception ex) {
-                logger.error("Failed to send error message: ", ex);
+                log.error("Failed to send error message: ", ex);
             }
         }
     }
@@ -128,167 +115,86 @@ public class SlackService {
     private void processQueryAndRespond(String queryText, String channel, Object ctx, String userId, String threadTs) {
         try {
             // Add reaction to show we're processing
-            addReaction(channel, threadTs, "eyes", ctx);
+            slackReactionService.addReaction(channel, threadTs, SlackConstants.PROCESSING_REACTION);
             
             // Use natural language processing to extract parameters
             NaturalLanguageProcessingService.ParameterExtractionResult extractionResult = 
                 nlpService.extractParameters(queryText, null);
             
             QueryRequest queryRequest = extractionResult.getQueryRequest();
-            logger.info("NLP extracted parameters - Case: {}, Step: {}, Datacenter: {}, Date: {}, Intent: {}, Confidence: {} (Method: {})", 
-                       queryRequest.getCaseNumber(), queryRequest.getStepName(), 
-                       queryRequest.getDatacenter(), queryRequest.getReportDate(),
-                       extractionResult.getIntent(), extractionResult.getConfidence(), extractionResult.getExtractionMethod());
+            log.info("NLP extracted parameters - Case: {}, Step: {}, Datacenter: {}, Date: {}, Intent: {}, Confidence: {} (Method: {})",
+                    queryRequest.getCaseNumber(), queryRequest.getStepName(), queryRequest.getDatacenter(), queryRequest.getReportDate(),
+                    extractionResult.getIntent(), extractionResult.getConfidence(), extractionResult.getExtractionMethod());
             
             String formattedResponse;
             
             if (extractionResult.isImportRequest()) {
                 // Handle import request (reactions managed fully inside the background task)
-                processImportRequest(queryRequest, queryText, extractionResult, channel, threadTs);
-                return; // Do not remove eyes or add check here; background task will manage
+                slackImportHandler.processImportRequest(queryRequest, channel, threadTs);
+                return;
             } else {
                 // Guardrail: block irrelevant queries early with a helpful response
                 if (!extractionResult.isRelevant()) {
-                    String msg = "🛑 This request doesn't look related to PMD failure logs or deployments.\n\n" +
-                                 "*Why*: " + (extractionResult.getIrrelevantReason() != null ? extractionResult.getIrrelevantReason() : "Question outside PMD/logs scope.") + "\n" +
-                                 "*Try one of these examples:*\n" +
-                                 "• What went wrong with case 123456?\n" +
-                                 "• Explain SSH_TO_ALL_HOSTS failures from last week\n" +
-                                 "• How many GRIDFORCE_APP_LOG_COPY failures in May 2025?";
-                    sendMessageInThread(channel, msg, ctx, threadTs);
-                    removeReaction(channel, threadTs, "eyes", ctx);
-                    addReaction(channel, threadTs, "no_entry", ctx);
+                    String msg = SlackConstants.IRRELEVANT_QUERY_MESSAGE + "\n*Why*: " + 
+                                (extractionResult.getIrrelevantReason() != null ? extractionResult.getIrrelevantReason() : "Question outside PMD/logs scope.");
+                    slackReactionService.sendMessage(channel, msg, threadTs);
+                    slackReactionService.removeReaction(channel, threadTs, SlackConstants.PROCESSING_REACTION);
+                    slackReactionService.addReaction(channel, threadTs, SlackConstants.BLOCKED_REACTION);
                     return;
                 }
                 // Route by intent: metrics vs analysis; if intent is null, do not proceed
                 String intent = extractionResult.getIntent();
                 if (intent == null) {
-                    String errorMsg = "❌ *Error*: I couldn't determine whether you want metrics or analysis.\n\n" +
-                                      "*💡 Try phrasing like:* 'How many ...' for counts, or 'Explain ...' for analysis.";
-                    sendMessageInThread(channel, errorMsg, ctx, threadTs);
-                    removeReaction(channel, threadTs, "eyes", ctx);
-                    addReaction(channel, threadTs, "x", ctx);
+                    slackReactionService.sendMessage(channel, SlackConstants.NO_INTENT_ERROR_MESSAGE, threadTs);
+                    slackReactionService.removeReaction(channel, threadTs, SlackConstants.PROCESSING_REACTION);
+                    slackReactionService.addReaction(channel, threadTs, SlackConstants.ERROR_REACTION);
                     return;
                 }
                 DatabaseQueryService.DatabaseQueryResult result = databaseQueryService.processNaturalLanguageQuery(queryText, intent);
-                formattedResponse = formatSlackResponseWithResult(result, queryText, extractionResult);
+                formattedResponse = formatSlackResponseWithResult(result, extractionResult);
             }
             
-            sendMessageInThread(channel, formattedResponse, ctx, threadTs);
+            slackReactionService.sendMessage(channel, formattedResponse, threadTs);
             
             // Remove processing reaction and add completion reaction
-            removeReaction(channel, threadTs, "eyes", ctx);
-            addReaction(channel, threadTs, "white_check_mark", ctx);
-            
+            slackReactionService.removeReaction(channel, threadTs, SlackConstants.PROCESSING_REACTION);
+            slackReactionService.addReaction(channel, threadTs, SlackConstants.SUCCESS_REACTION);
         } catch (IllegalArgumentException e) {
-            logger.warn("Invalid query from user {}: {}", userId, e.getMessage());
-            String errorMsg = "❌ *Error*: " + e.getMessage() + "\n\n" + 
-                             "*💡 Try natural language queries like:*\n" +
-                             "• `What went wrong with case 123456?`\n" +
-                             "• `Show me SSH failures from yesterday`\n" +
-                             "• `Why did the GridForce deployment fail on CS58?`";
-            sendMessageInThread(channel, errorMsg, ctx, threadTs);
-            removeReaction(channel, threadTs, "eyes", ctx);
-            addReaction(channel, threadTs, "x", ctx);
+            log.warn("Invalid query from user {}: {}", userId, e.getMessage());
+            String errorMsg = "*Error*: " + e.getMessage() + "\n\n" + SlackConstants.USAGE_EXAMPLES;
+            slackReactionService.sendMessage(channel, errorMsg, threadTs);
+            slackReactionService.removeReaction(channel, threadTs, SlackConstants.PROCESSING_REACTION);
+            slackReactionService.addReaction(channel, threadTs, SlackConstants.ERROR_REACTION);
         } catch (Exception e) {
-            logger.error("Error processing query from user {}: ", userId, e);
-            sendMessageInThread(channel, "❌ Sorry, I encountered an error processing your request. Please try again later.", ctx, threadTs);
-            removeReaction(channel, threadTs, "eyes", ctx);
-            addReaction(channel, threadTs, "x", ctx);
+            log.error("Error processing query from user {}: ", userId, e);
+            slackReactionService.sendMessage(channel, ErrorMessages.GENERIC_ERROR_MESSAGE, threadTs);
+            slackReactionService.removeReaction(channel, threadTs, SlackConstants.PROCESSING_REACTION);
+            slackReactionService.addReaction(channel, threadTs, SlackConstants.ERROR_REACTION);
         }
     }
 
-    /**
-     * Process import request from Slack
-     */
-    private String processImportRequest(QueryRequest queryRequest, String originalQuery, 
-                                      NaturalLanguageProcessingService.ParameterExtractionResult extractionResult,
-                                      String channelId, String messageTs) {
-        try {
-            // Create LogImportRequest from QueryRequest
-            LogImportRequest importRequest = new LogImportRequest();
-            importRequest.setCaseNumber(queryRequest.getCaseNumber());
-            importRequest.setStepName(queryRequest.getStepName());
-            
-            // Validate that we have either case number or step name
-            if (importRequest.getCaseNumber() == null && 
-                (importRequest.getStepName() == null || importRequest.getStepName().trim().isEmpty())) {
-                return "❌ *Error*: I need either a case number or step name to import logs.\n\n" +
-                       "*💡 Try queries like:*\n" +
-                       "• `Import logs for case 123456`\n" +
-                       "• `Pull logs from SSH_TO_ALL_HOSTS step`\n" +
-                       "• `Fetch GRIDFORCE_APP_LOG_COPY logs`";
-            }
-            
-            String searchCriteria;
-            if (importRequest.getCaseNumber() != null) {
-                searchCriteria = "case " + importRequest.getCaseNumber();
-            } else {
-                searchCriteria = "step " + importRequest.getStepName();
-            }
-            
-            // Start background processing in a separate thread (manage reactions in correct order)
-            new Thread(() -> {
-                try {
-                    // Remove eyes, then add arrows to indicate active processing
-                    removeReaction(channelId, messageTs, "eyes", null);
-                    addReaction(channelId, messageTs, "arrows_counterclockwise", null);
-                    
-                    // Perform the actual import
-                    ResponseEntity<LogImportResponse> importResponseEntity = logImportService.importLogs(importRequest);
-                    LogImportResponse importResponse = importResponseEntity.getBody();
-                    
-                    // Swap arrows -> check when done
-                    removeReaction(channelId, messageTs, "arrows_counterclockwise", null);
-                    addReaction(channelId, messageTs, "white_check_mark", null);
-                    
-                    // Send simple completion message in thread
-                    String completionMessage = String.format("Successfully imported %d logs for %s", 
-                                                           importResponse.getSuccessfulLogs(), searchCriteria);
-                    sendMessageInThread(channelId, completionMessage, null, messageTs);
-                    
-                } catch (Exception e) {
-                    logger.error("Background import failed: ", e);
-                    // Swap arrows -> X on failure
-                    removeReaction(channelId, messageTs, "arrows_counterclockwise", null);
-                    addReaction(channelId, messageTs, "x", null);
-                    sendMessageInThread(channelId, "Import failed for " + searchCriteria + ": " + e.getMessage(), null, messageTs);
-                }
-            }).start();
-            
-            // We managed reactions and messaging asynchronously; return empty string
-            return "";
-            
-        } catch (Exception e) {
-            logger.error("Error processing import request: ", e);
-            return "❌ *Error importing logs*: " + e.getMessage() + "\n\n" +
-                   "Please try again or contact support if the issue persists.";
-        }
-    }
 
     /**
      * Format response for Slack with NLP context
      */
-    private String formatSlackResponseWithResult(DatabaseQueryService.DatabaseQueryResult result, String originalQuery, 
+    private String formatSlackResponseWithResult(DatabaseQueryService.DatabaseQueryResult result,
                                            NaturalLanguageProcessingService.ParameterExtractionResult extractionResult) {
         StringBuilder sb = new StringBuilder();
         
         // Add confidence indicator only when confidence is low AND result is weak (to avoid hedging before good answers)
-        boolean lowConfidence = "LLM_EXTRACTION".equals(extractionResult.getExtractionMethod()) && extractionResult.getConfidence() < 0.5;
+        boolean lowConfidence = "LLM_EXTRACTION".equals(extractionResult.getExtractionMethod()) && extractionResult.getConfidence() < SlackConstants.LOW_CONFIDENCE_THRESHOLD;
         boolean weakResult = result == null || !result.successful() || result.getResultCount() == 0;
         if (lowConfidence && weakResult) {
-            sb.append("🤔 *I'm not completely sure I understood your query correctly.*\n\n");
+            sb.append("*I'm not completely sure I understood your query correctly.*\n\n");
         }
         
         // Get the natural language response from the result
-        String analysisText = result.naturalLanguageResponse();
-        sb.append(analysisText);
-        
-        // Related work items removed from Slack responses
-        
+        String analysisText = result != null ? result.naturalLanguageResponse() : "No response available";
+        sb.append(analysisText != null ? analysisText : "No response available");
+
         // Add extracted parameters info for transparency only when confidence is low AND result is weak
-        if (extractionResult.getConfidence() < 0.5 && weakResult) {
-            sb.append("\n\n_🔍 I extracted these parameters: ");
+        if (extractionResult.getConfidence() < SlackConstants.LOW_CONFIDENCE_THRESHOLD && weakResult) {
+            sb.append("\n\n_I extracted these parameters: ");
             QueryRequest params = extractionResult.getQueryRequest();
             boolean hasParams = false;
             
@@ -319,96 +225,5 @@ public class SlackService {
         }
         
         return sb.toString();
-    }
-    
-    /**
-     * Send a message in a thread
-     */
-    private void sendMessageInThread(String channel, String message, Object ctx, String threadTs) {
-        if (message == null || message.trim().isEmpty()) {
-            return;
-        }
-        
-        try {
-            if (ctx instanceof EventContext) {
-                ((EventContext) ctx).client().chatPostMessage(r -> {
-                    var req = r.channel(channel).text(message);
-                    if (threadTs != null) {
-                        req.threadTs(threadTs);
-                    }
-                    return req;
-                });
-            } else {
-                // Fallback to app client
-                slackApp.client().chatPostMessage(r -> {
-                    var req = r.channel(channel).text(message);
-                    if (threadTs != null) {
-                        req.threadTs(threadTs);
-                    }
-                    return req;
-                });
-            }
-        } catch (Exception e) {
-            logger.error("Failed to send threaded message to channel {}: ", channel, e);
-        }
-    }
-    
-    /**
-     * Add a reaction to a message
-     */
-    private void addReaction(String channel, String timestamp, String reaction, Object ctx) {
-        try {
-            if (ctx instanceof EventContext) {
-                ((EventContext) ctx).client().reactionsAdd(r -> r
-                    .channel(channel)
-                    .timestamp(timestamp)
-                    .name(reaction)
-                );
-            } else {
-                // Fallback to app client
-                slackApp.client().reactionsAdd(r -> r
-                    .channel(channel)
-                    .timestamp(timestamp)
-                    .name(reaction)
-                );
-            }
-        } catch (Exception e) {
-            logger.debug("Failed to add reaction '{}' to message: {}", reaction, e.getMessage());
-        }
-    }
-    
-    /**
-     * Remove a reaction from a message
-     */
-    private void removeReaction(String channel, String timestamp, String reaction, Object ctx) {
-        try {
-            logger.info("Removing reaction '{}' from message {} in channel {}", reaction, timestamp, channel);
-            if (ctx instanceof EventContext) {
-                var response = ((EventContext) ctx).client().reactionsRemove(r -> r
-                    .channel(channel)
-                    .timestamp(timestamp)
-                    .name(reaction)
-                );
-                if (response.isOk()) {
-                    logger.info("Successfully removed reaction '{}'", reaction);
-                } else {
-                    logger.debug("Could not remove reaction '{}': {} (may not exist)", reaction, response.getError());
-                }
-            } else {
-                // Fallback to app client
-                var response = slackApp.client().reactionsRemove(r -> r
-                    .channel(channel)
-                    .timestamp(timestamp)
-                    .name(reaction)
-                );
-                if (response.isOk()) {
-                    logger.info("Successfully removed reaction '{}'", reaction);
-                } else {
-                    logger.debug("Could not remove reaction '{}': {} (may not exist)", reaction, response.getError());
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Exception removing reaction '{}' from message: {}", reaction, e.getMessage());
-        }
     }
 }

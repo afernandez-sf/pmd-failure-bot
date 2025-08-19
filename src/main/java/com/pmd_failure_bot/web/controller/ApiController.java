@@ -15,17 +15,15 @@ import java.util.List;
 public class ApiController {
     
     private static final String HEALTH_MESSAGE = "Natural Language Query Tool is operational";
-    private static final String API_HEALTH_PATH = "/health";
-    private static final String API_HELP_PATH = "/help";
     private static final HelpResponse HELP_RESPONSE = new HelpResponse();
 
-    @GetMapping(API_HEALTH_PATH)
+    @GetMapping("/health")
     public ResponseEntity<String> health() {
         log.debug("Health check requested");
         return ResponseEntity.ok(HEALTH_MESSAGE);
     }
 
-    @GetMapping(API_HELP_PATH)
+    @GetMapping("/help")
     public ResponseEntity<HelpResponse> getHelp() {
         log.debug("Help documentation requested");
         return ResponseEntity.ok(HELP_RESPONSE);

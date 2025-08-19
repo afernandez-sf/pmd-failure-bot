@@ -3,129 +3,100 @@ package com.pmd_failure_bot.web.controller;
 import com.pmd_failure_bot.web.dto.request.NaturalLanguageQueryRequest;
 import com.pmd_failure_bot.web.dto.response.NaturalLanguageQueryResponse;
 import com.pmd_failure_bot.web.dto.request.QueryRequest;
-import com.pmd_failure_bot.web.dto.response.QueryResponse;
 import com.pmd_failure_bot.web.dto.QueryResponseFactory;
 import com.pmd_failure_bot.service.query.DatabaseQueryService;
 import com.pmd_failure_bot.service.analysis.NaturalLanguageProcessingService;
+import com.pmd_failure_bot.common.constants.ErrorMessages;
 import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
-import java.util.List;
 import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/query")
+@RequiredArgsConstructor
+@Slf4j
 public class QueryController {
 
-    private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
     private final NaturalLanguageProcessingService nlpService;
     private final DatabaseQueryService databaseQueryService;
     private final QueryResponseFactory responseFactory;
 
-    @Autowired
-    public QueryController(NaturalLanguageProcessingService nlpService,
-                           DatabaseQueryService databaseQueryService,
-                           QueryResponseFactory responseFactory) {
-        this.nlpService = nlpService;
-        this.databaseQueryService = databaseQueryService;
-        this.responseFactory = responseFactory;
-    }
-
     @PostMapping
     public ResponseEntity<NaturalLanguageQueryResponse> processNaturalLanguageQuery(@Valid @RequestBody NaturalLanguageQueryRequest request) {
-        long startTime = System.currentTimeMillis();
         String conversationId = UUID.randomUUID().toString();
         try {
-            logger.info("Processing natural language query: '{}' (conversation: {})", request.getQuery(), conversationId);
-            logger.info("🤖 Processing natural language query with function calling: {}", request.getQuery());
-            return handleNaturalLanguageQuery(request, conversationId, startTime);
+            log.info("Processing natural language query: '{}' (conversation: {})", request.getQuery(), conversationId);
+            return handleNaturalLanguageQuery(request, conversationId);
         } catch (IllegalArgumentException e) {
-            logger.warn("Invalid query parameters for conversation {}: {}", conversationId, e.getMessage());
-            NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
-                "I couldn't understand your query: " + e.getMessage() + 
-                ". Please try rephrasing or provide more specific details.",
-                new QueryRequest(),
-                List.of(),
-                0.0,
-                LocalDateTime.now(),
-                System.currentTimeMillis() - startTime
-            );
-            errorResponse.setConversationId(conversationId);
-            return ResponseEntity.badRequest().body(errorResponse);
+            log.warn("Invalid query parameters for conversation {}: {}", conversationId, e.getMessage());
+            return createErrorResponse(String.format(ErrorMessages.VALIDATION_ERROR_FORMAT, e.getMessage()), conversationId, true);
         } catch (Exception e) {
-            logger.error("Error processing natural language query for conversation {}: ", conversationId, e);
-            NaturalLanguageQueryResponse errorResponse = new NaturalLanguageQueryResponse(
-                "I'm sorry, I encountered an error while processing your query. Please try again later or contact support if the issue persists.",
-                new QueryRequest(),
-                List.of(),
-                0.0,
-                LocalDateTime.now(),
-                System.currentTimeMillis() - startTime
-            );
-            errorResponse.setConversationId(conversationId);
-            return ResponseEntity.internalServerError().body(errorResponse);
+            log.error("Error processing natural language query for conversation {}: ", conversationId, e);
+            return createErrorResponse(ErrorMessages.GENERAL_ERROR_MESSAGE, conversationId, false);
         }
     }
 
-    private ResponseEntity<NaturalLanguageQueryResponse> handleNaturalLanguageQuery(NaturalLanguageQueryRequest request,
-                                                                                     String conversationId,
-                                                                                     long startTime) {
+    private ResponseEntity<NaturalLanguageQueryResponse> handleNaturalLanguageQuery(NaturalLanguageQueryRequest request, String conversationId) {
         try {
-            String intent = "metrics";
-            try {
-                NaturalLanguageProcessingService.ParameterExtractionResult extraction =
-                    nlpService.extractParameters(request.getQuery(), request.getConversationContext());
-                intent = extraction.getIntent();
-            } catch (Exception ignored) {}
-
-            DatabaseQueryService.DatabaseQueryResult result =
-                databaseQueryService.processNaturalLanguageQuery(request.getQuery(), intent);
-
-            if (result.successful()) {
-                List<QueryResponse.ReportInfo> reportPaths = List.of();
-                long executionTimeMs = System.currentTimeMillis() - startTime;
-                logger.info("✅ Function calling query successful: {} records found in {}ms", result.getResultCount(), executionTimeMs);
-                logger.info("📊 Generated SQL: {}", result.sqlQuery());
-                QueryRequest qr = new QueryRequest();
-                qr.setQuery(request.getQuery());
-                NaturalLanguageQueryResponse response = responseFactory.createSuccessResponse(
-                    result.naturalLanguageResponse(),
-                    qr,
-                    conversationId,
-                    1.0,
-                    executionTimeMs
-                );
-                return ResponseEntity.ok(response);
-            } else {
-                logger.error("❌ Function calling query failed: {}", result.errorMessage());
-                QueryRequest errorQueryRequest = new QueryRequest();
-                errorQueryRequest.setQuery(request.getQuery());
-                NaturalLanguageQueryResponse errorResponse = responseFactory.createErrorResponse(
-                    "I encountered an error while processing your query: " + result.errorMessage(),
-                    errorQueryRequest,
-                    conversationId,
-                    System.currentTimeMillis() - startTime
-                );
-                return ResponseEntity.internalServerError().body(errorResponse);
+            String intent = extractIntent(request);
+            if (intent == null) {
+                return createFactoryErrorResponse(ErrorMessages.INTENT_EXTRACTION_FAILURE_MESSAGE, request, conversationId);
             }
+            DatabaseQueryService.DatabaseQueryResult result = databaseQueryService.processNaturalLanguageQuery(request.getQuery(), intent);
+            return processQueryResult(result, request, conversationId);
         } catch (Exception e) {
-            logger.error("💥 Exception in function calling query: ", e);
-            QueryRequest exceptionQueryRequest = new QueryRequest();
-            exceptionQueryRequest.setQuery(request.getQuery());
-            NaturalLanguageQueryResponse errorResponse = responseFactory.createErrorResponse(
-                "I encountered an unexpected error while processing your query. Please try again or contact support.",
-                exceptionQueryRequest,
-                conversationId,
-                System.currentTimeMillis() - startTime
-            );
-            return ResponseEntity.internalServerError().body(errorResponse);
+            log.error("Exception in function calling query: ", e);
+            return createFactoryErrorResponse(ErrorMessages.UNEXPECTED_ERROR_MESSAGE, request, conversationId);
         }
+    }
+
+    private ResponseEntity<NaturalLanguageQueryResponse> createErrorResponse(String message, String conversationId, boolean isBadRequest) {
+        NaturalLanguageQueryResponse errorResponse = responseFactory.createErrorResponse(message, new QueryRequest(), conversationId);
+        return isBadRequest ? ResponseEntity.badRequest().body(errorResponse) : ResponseEntity.internalServerError().body(errorResponse);
+    }
+
+    private String extractIntent(NaturalLanguageQueryRequest request) {
+        try {
+            NaturalLanguageProcessingService.ParameterExtractionResult extraction = nlpService.extractParameters(request.getQuery(), request.getConversationContext());
+            return extraction.getIntent();
+        } catch (Exception e) {
+            log.warn("Failed to extract intent from query: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private ResponseEntity<NaturalLanguageQueryResponse> processQueryResult(DatabaseQueryService.DatabaseQueryResult result,
+                                                                            NaturalLanguageQueryRequest request, String conversationId) {
+        if (result.successful()) {
+            log.info("Function calling query successful: {} records found", result.getResultCount());
+            log.info("Generated SQL: {}", result.sqlQuery());
+            
+            QueryRequest queryRequest = createQueryRequest(request.getQuery());
+            NaturalLanguageQueryResponse response = responseFactory.createSuccessResponse(result.naturalLanguageResponse(),
+                    queryRequest, conversationId);
+            return ResponseEntity.ok(response);
+        } else {
+            log.error("Function calling query failed: {}", result.errorMessage());
+            return createFactoryErrorResponse(String.format(ErrorMessages.PROCESSING_ERROR_FORMAT, result.errorMessage()), request, conversationId);
+        }
+    }
+
+    private ResponseEntity<NaturalLanguageQueryResponse> createFactoryErrorResponse(String message, NaturalLanguageQueryRequest request,
+                                                                                    String conversationId) {
+        QueryRequest queryRequest = createQueryRequest(request.getQuery());
+        NaturalLanguageQueryResponse errorResponse = responseFactory.createErrorResponse(message, queryRequest, conversationId);
+        return ResponseEntity.internalServerError().body(errorResponse);
+    }
+
+    private QueryRequest createQueryRequest(String query) {
+        QueryRequest queryRequest = new QueryRequest();
+        queryRequest.setQuery(query);
+        return queryRequest;
     }
 }
 
