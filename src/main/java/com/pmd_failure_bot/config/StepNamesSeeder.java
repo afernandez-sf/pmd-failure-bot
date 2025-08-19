@@ -13,8 +13,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
@@ -39,7 +37,7 @@ public class StepNamesSeeder {
 
         Set<String> names = readStepNames();
         if (names.isEmpty()) {
-            logger.warn("No step names found to seed. Ensure STEP_NAMES.md is available.");
+            logger.warn("No step names found to seed. Ensure STEP_NAMES.txt is available.");
             return;
         }
 
@@ -54,21 +52,11 @@ public class StepNamesSeeder {
     private Set<String> readStepNames() {
         Set<String> out = new HashSet<>();
 
-        // Try classpath resource
-        try (InputStream in = getClass().getResourceAsStream("/STEP_NAMES.md")) {
+        try (InputStream in = getClass().getResourceAsStream("/STEP_NAMES.txt")) {
             if (in != null) {
                 loadFromStream(in, out);
-                return out;
             }
         } catch (IOException ignored) {}
-
-        // Try working dir file
-        Path path = Path.of("STEP_NAMES.md");
-        if (Files.exists(path)) {
-            try (InputStream in = Files.newInputStream(path)) {
-                loadFromStream(in, out);
-            } catch (IOException ignored) {}
-        }
 
         return out;
     }

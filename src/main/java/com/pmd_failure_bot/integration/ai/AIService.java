@@ -1,5 +1,7 @@
 package com.pmd_failure_bot.integration.ai;
 
+import lombok.Getter;
+
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +27,7 @@ public interface AIService {
     /**
      * Response class for function calling operations
      */
+    @Getter
     class FunctionCallResponse {
         private final boolean functionCall;
         private final String functionName;
@@ -47,11 +50,5 @@ public interface AIService {
             this.invocationId = invocationId;
             this.content = content;
         }
-
-        public boolean isFunctionCall() { return functionCall; }
-        public String getFunctionName() { return functionName; }
-        public String getArguments() { return arguments; }
-        public String getInvocationId() { return invocationId; }
-        public String getContent() { return content; }
     }
 }

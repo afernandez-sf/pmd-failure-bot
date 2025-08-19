@@ -1,10 +1,14 @@
 package com.pmd_failure_bot.data.entity;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import java.time.LocalDate;
 
+@Getter
+@Setter
 @Entity
 @Table(name = "pmd_failure_logs")
 public class PmdReport {
@@ -37,20 +41,6 @@ public class PmdReport {
     @Column(name = "report_date")
     private LocalDate reportDate;
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public String getRecordId() { return recordId; }
-    public void setRecordId(String recordId) { this.recordId = recordId; }
-    public String getWorkId() { return workId; }
-    public void setWorkId(String workId) { this.workId = workId; }
-    public Integer getCaseNumber() { return caseNumber; }
-    public void setCaseNumber(Integer caseNumber) { this.caseNumber = caseNumber; }
-    public String getStepName() { return stepName; }
-    public void setStepName(String stepName) { this.stepName = stepName; }
-    public String getAttachmentId() { return attachmentId; }
-    public void setAttachmentId(String attachmentId) { this.attachmentId = attachmentId; }
-    public String getDatacenter() { return datacenter; }
-    public void setDatacenter(String datacenter) { this.datacenter = datacenter; }
 
     public String getContent() {
         if (content == null || content.length == 0) return "";
@@ -83,9 +73,6 @@ public class PmdReport {
             this.content = contentString.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         }
     }
-
-    public LocalDate getReportDate() { return reportDate; }
-    public void setReportDate(LocalDate reportDate) { this.reportDate = reportDate; }
 }
 
 

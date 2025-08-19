@@ -3,30 +3,26 @@ package com.pmd_failure_bot.config;
 import com.slack.api.bolt.App;
 import com.slack.api.bolt.AppConfig;
 import com.slack.api.bolt.socket_mode.SocketModeApp;
+import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+@Data
 @Configuration
+@ConfigurationProperties(prefix = "slack")
 public class SlackConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(SlackConfig.class);
 
-    @Value("${slack.bot.token:}")
     private String botToken;
-
-    @Value("${slack.app.token:}")
     private String appToken;
-
-    @Value("${slack.signing.secret:}")
     private String signingSecret;
-
 
     @Bean
     public App slackApp() {
-        // Validate configuration
         if (botToken == null || botToken.trim().isEmpty()) {
             logger.error("SLACK_BOT_TOKEN is not configured. Slack integration will be disabled.");
             return null;
@@ -38,18 +34,10 @@ public class SlackConfig {
         }
 
         try {
-            // Create app configuration
-            AppConfig appConfig = AppConfig.builder()
-                    .singleTeamBotToken(botToken)
-                    .signingSecret(signingSecret)
-                    .build();
-
-            // Create Slack app
+            AppConfig appConfig = AppConfig.builder().singleTeamBotToken(botToken).signingSecret(signingSecret).build();
             App app = new App(appConfig);
-            
             logger.info("Slack app configured successfully");
             return app;
-            
         } catch (Exception e) {
             logger.error("Failed to configure Slack app: ", e);
             return null;
@@ -66,7 +54,6 @@ public class SlackConfig {
         try {
             SocketModeApp socketModeApp = new SocketModeApp(appToken, slackApp);
             
-            // Start the socket mode app in a separate thread
             new Thread(() -> {
                 try {
                     logger.info("Starting Slack Socket Mode connection...");
@@ -84,5 +71,4 @@ public class SlackConfig {
             return null;
         }
     }
-
 }

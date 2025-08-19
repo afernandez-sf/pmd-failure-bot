@@ -67,7 +67,7 @@ public class PromptTemplates {
             "You answer metrics questions about PMD failure logs for Slack. Use the data in <context> to answer the <question>.\n\n" +
             "Output (plain text):\n" +
             "- Line 1: Direct numeric total with scope (include step/date/datacenter if present).\n" +
-            "- Following lines: Provide a breakdown using the most informative dimensions present in the data and relevant to the question (e.g., step_name, report_date, datacenter, case_number, work_id, hostname).\n" +
+            "- Following lines: Provide a breakdown using the most informative dimensions present in the data and relevant to the question (e.g., step_name, report_date, datacenter, case_number, work_id).\n" +
             "- If there is no matching data, output exactly: No matching data found.\n\n" +
             "Rules:\n" +
             "- Compute totals from the aggregates in the data, not from number of rows.\n" +
@@ -91,7 +91,7 @@ public class PromptTemplates {
     /**
      * Analysis prompt (explain errors/root cause) for Slack-ready answers
      */
-    public String nlErrorSummary(String originalQuery, String sql, String formattedResults, int resultCount) {
+    public String nlErrorSummary(String originalQuery, String sql, String formattedResults) {
         return String.format(
             "<instructions>\n" +
             "You explain PMD failure logs in plain language for Slack. Use the data in <context> to answer the <question>.\n\n" +

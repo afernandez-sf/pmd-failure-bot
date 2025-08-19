@@ -2,17 +2,18 @@ package com.pmd_failure_bot.service.imports;
 
 import com.pmd_failure_bot.web.dto.request.LogImportRequest;
 import com.pmd_failure_bot.web.dto.response.LogImportResponse;
+import com.pmd_failure_bot.data.entity.PmdReport;
 import com.pmd_failure_bot.data.repository.PmdReportRepository;
 import com.pmd_failure_bot.integration.salesforce.SalesforceService;
 import com.pmd_failure_bot.util.StepNameNormalizer;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -23,48 +24,53 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class LogImportService {
+
+    private static final int MIN_THREAD_POOL_SIZE = 2;
+    private static final int MAX_THREAD_POOL_SIZE = 8;
 
     private final SalesforceService salesforceService;
     private final LogProcessingService logProcessingService;
     private final PmdReportRepository pmdReportRepository;
     private final StepNameNormalizer stepNameNormalizer;
 
-    @Autowired
-    public LogImportService(SalesforceService salesforceService,
-                          LogProcessingService logProcessingService,
-                          PmdReportRepository pmdReportRepository,
-                          StepNameNormalizer stepNameNormalizer) {
-        this.salesforceService = salesforceService;
-        this.logProcessingService = logProcessingService;
-        this.pmdReportRepository = pmdReportRepository;
-        this.stepNameNormalizer = stepNameNormalizer;
-    }
-
     public ResponseEntity<LogImportResponse> importLogs(LogImportRequest request) {
         long startTime = System.currentTimeMillis();
+        log.info("Starting log import for request: {}", request);
+        
         try {
             validateRequestOrThrow(request);
             String searchCriteria = buildSearchCriteria(request);
             List<Map<String, Object>> salesforceRecords = fetchSalesforceRecords(request);
+            
             if (salesforceRecords.isEmpty()) {
+                log.info("No failed attachments found for {}", searchCriteria);
                 return ResponseEntity.ok(new LogImportResponse(
                     "No failed attachments found for " + searchCriteria,
                     0, 0, 0, 0, 0, List.of(), System.currentTimeMillis() - startTime
                 ));
             }
+            
             List<AttachmentInfo> attachments = collectAttachments(request, salesforceRecords);
             Set<String> alreadyProcessedIds = computeAlreadyProcessedIds(attachments);
             ExecutionAggregation aggregation = processAttachments(attachments, alreadyProcessedIds);
             LogImportResponse response = buildResponse(searchCriteria, aggregation, startTime);
+            
+            log.info("Log import completed successfully for {}: {} total attachments, {} processed", 
+                    searchCriteria, aggregation.totalAttachments, aggregation.processedAttachments);
             return ResponseEntity.ok(response);
+            
         } catch (IllegalArgumentException e) {
+            log.error("Invalid request for log import: {}", e.getMessage());
             LogImportResponse errorResponse = new LogImportResponse(
                 "Error: " + e.getMessage(),
                 0, 0, 0, 0, 0, List.of(), System.currentTimeMillis() - startTime
             );
             return ResponseEntity.badRequest().body(errorResponse);
         } catch (Exception e) {
+            log.error("Internal server error during log import", e);
             LogImportResponse errorResponse = new LogImportResponse(
                 "Internal server error: " + e.getMessage(),
                 0, 0, 0, 0, 0, List.of(), System.currentTimeMillis() - startTime
@@ -123,12 +129,12 @@ public class LogImportService {
     }
 
     private Set<String> computeAlreadyProcessedIds(List<AttachmentInfo> attachments) {
-        List<String> attachmentIds = attachments.stream().map(a -> a.attachmentId).collect(Collectors.toList());
-        return new HashSet<>(
-            pmdReportRepository.findByAttachmentIdIn(attachmentIds).stream()
-                .map(r -> r.getAttachmentId())
-                .collect(Collectors.toSet())
-        );
+        List<String> attachmentIds = attachments.stream()
+                .map(AttachmentInfo::attachmentId)
+                .collect(Collectors.toList());
+        return pmdReportRepository.findByAttachmentIdIn(attachmentIds).stream()
+                .map(PmdReport::getAttachmentId)
+                .collect(Collectors.toSet());
     }
 
     private ExecutionAggregation processAttachments(List<AttachmentInfo> attachments, Set<String> alreadyProcessedIds) throws Exception {
@@ -156,7 +162,7 @@ public class LogImportService {
                 attachmentsToProcess.add(attachment);
             }
         }
-        int parallelism = Math.max(2, Math.min(8, Runtime.getRuntime().availableProcessors()));
+        int parallelism = Math.max(MIN_THREAD_POOL_SIZE, Math.min(MAX_THREAD_POOL_SIZE, Runtime.getRuntime().availableProcessors()));
         ExecutorService executor = Executors.newFixedThreadPool(parallelism);
         List<Future<LogProcessingService.ProcessingResult>> futures = new ArrayList<>();
         for (AttachmentInfo attachment : attachmentsToProcess) {
@@ -258,21 +264,7 @@ public class LogImportService {
         return "UNKNOWN_STEP";
     }
 
-    private static class AttachmentInfo {
-        final String attachmentId;
-        final String attachmentName;
-        final String recordId;
-        final String stepName;
-        final Map<String, Object> salesforceMetadata;
-        AttachmentInfo(String attachmentId, String attachmentName, String recordId,
-                       String stepName, Map<String, Object> salesforceMetadata) {
-            this.attachmentId = attachmentId;
-            this.attachmentName = attachmentName;
-            this.recordId = recordId;
-            this.stepName = stepName;
-            this.salesforceMetadata = salesforceMetadata;
-        }
-    }
+    private record AttachmentInfo(String attachmentId, String attachmentName, String recordId, String stepName, Map<String, Object> salesforceMetadata) {}
 }
 
 

@@ -5,9 +5,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pmd_failure_bot.web.dto.request.QueryRequest;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import com.pmd_failure_bot.integration.ai.AIService;
@@ -17,26 +18,22 @@ import com.pmd_failure_bot.util.StepNameNormalizer;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Service for natural language processing and parameter extraction
  */
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class NaturalLanguageProcessingService {
-
-    private static final Logger logger = LoggerFactory.getLogger(NaturalLanguageProcessingService.class);
 
     private final AIService aiService;
     private final PromptTemplates promptTemplates;
     private final StepNameNormalizer stepNameNormalizer;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Autowired
-    public NaturalLanguageProcessingService(AIService aiService, PromptTemplates promptTemplates, StepNameNormalizer stepNameNormalizer) {
-        this.aiService = aiService;
-        this.promptTemplates = promptTemplates;
-        this.stepNameNormalizer = stepNameNormalizer;
-    }
 
     /**
      * Extracts structured parameters from natural language query using LLM
@@ -48,46 +45,48 @@ public class NaturalLanguageProcessingService {
                 conversationContext,
                 LocalDate.now().toString()
             );
-            // Use structured outputs to get strict JSON for extraction
-            java.util.Map<String, Object> schema = new java.util.HashMap<>();
-            schema.put("name", "extracted_parameters");
-            schema.put("strict", true);
-            java.util.Map<String, Object> schemaDef = new java.util.HashMap<>();
-            schemaDef.put("type", "object");
-            java.util.Map<String, Object> properties = new java.util.HashMap<>();
-            properties.put("record_id", java.util.Map.of("type", "string"));
-            properties.put("work_id", java.util.Map.of("type", "string"));
-            properties.put("case_number", java.util.Map.of("type", "integer"));
-            properties.put("step_name", java.util.Map.of("type", "string"));
-            properties.put("attachment_id", java.util.Map.of("type", "string"));
-            properties.put("datacenter", java.util.Map.of("type", "string"));
-            properties.put("report_date", java.util.Map.of("type", "string"));
-            properties.put("query", java.util.Map.of("type", "string"));
-            properties.put("intent", java.util.Map.of("type", "string", "enum", java.util.List.of("import","metrics","analysis")));
-            properties.put("response_mode", java.util.Map.of("type", "string", "enum", java.util.List.of("metrics","analysis")));
-            properties.put("confidence", java.util.Map.of("type", "number", "minimum", 0, "maximum", 1));
-            properties.put("is_relevant", java.util.Map.of("type", "boolean"));
-            properties.put("irrelevant_reason", java.util.Map.of("type", "string"));
-            schemaDef.put("properties", properties);
-            schemaDef.put("additionalProperties", false);
-            schema.put("schema", schemaDef);
+            Map<String, Object> schema = buildParameterExtractionSchema();
 
             String llmResponse = aiService.generateStructured(extractionPrompt, schema);
             return parseParameterExtractionResponse(llmResponse, naturalLanguageQuery);
 
         } catch (Exception e) {
-            logger.error("Error extracting parameters from query: {}", naturalLanguageQuery, e);
+            log.error("Error extracting parameters from query: {}", naturalLanguageQuery, e);
             return new ParameterExtractionResult(new QueryRequest(), 0.0, "LLM_ERROR");
         }
     }
 
     /**
-     * Detects if the natural language query is requesting an import operation
+     * Builds the JSON schema for parameter extraction
      */
-    public boolean isImportRequest(String naturalLanguageQuery) {
-        String query = naturalLanguageQuery.toLowerCase();
-        return query.contains("import") || query.contains("pull") || query.contains("fetch") ||
-               query.contains("get logs") || query.contains("download") || query.contains("load");
+    private Map<String, Object> buildParameterExtractionSchema() {
+        Map<String, Object> schema = new HashMap<>();
+        schema.put("name", "extracted_parameters");
+        schema.put("strict", true);
+        
+        Map<String, Object> schemaDef = new HashMap<>();
+        schemaDef.put("type", "object");
+        
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("record_id", Map.of("type", "string"));
+        properties.put("work_id", Map.of("type", "string"));
+        properties.put("case_number", Map.of("type", "integer"));
+        properties.put("step_name", Map.of("type", "string"));
+        properties.put("attachment_id", Map.of("type", "string"));
+        properties.put("datacenter", Map.of("type", "string"));
+        properties.put("report_date", Map.of("type", "string"));
+        properties.put("query", Map.of("type", "string"));
+        properties.put("intent", Map.of("type", "string", "enum", List.of("import","metrics","analysis")));
+        properties.put("response_mode", Map.of("type", "string", "enum", List.of("metrics","analysis")));
+        properties.put("confidence", Map.of("type", "number", "minimum", 0, "maximum", 1));
+        properties.put("is_relevant", Map.of("type", "boolean"));
+        properties.put("irrelevant_reason", Map.of("type", "string"));
+        
+        schemaDef.put("properties", properties);
+        schemaDef.put("additionalProperties", false);
+        schema.put("schema", schemaDef);
+        
+        return schema;
     }
 
     /**
@@ -95,125 +94,100 @@ public class NaturalLanguageProcessingService {
      */
     private ParameterExtractionResult parseParameterExtractionResponse(String llmResponse, String originalQuery) {
         try {
-            // Clean the response to extract JSON
             String jsonResponse = JsonUtils.extractJsonFromResponse(llmResponse);
             JsonNode responseNode = objectMapper.readTree(jsonResponse);
 
             QueryRequest queryRequest = new QueryRequest();
 
             // Extract each parameter
-            if (responseNode.has("record_id") && !responseNode.get("record_id").isNull()) {
-                queryRequest.setRecordId(responseNode.get("record_id").asText());
-            }
-
-            if (responseNode.has("work_id") && !responseNode.get("work_id").isNull()) {
-                queryRequest.setWorkId(responseNode.get("work_id").asText());
-            }
-
-            if (responseNode.has("case_number") && !responseNode.get("case_number").isNull()) {
-                queryRequest.setCaseNumber(responseNode.get("case_number").asInt());
-            }
-
-            if (responseNode.has("step_name") && !responseNode.get("step_name").isNull()) {
+            extractStringField(responseNode, "record_id", queryRequest::setRecordId);
+            extractStringField(responseNode, "work_id", queryRequest::setWorkId);
+            extractIntField(responseNode, "case_number", queryRequest::setCaseNumber);
+            extractStringField(responseNode, "attachment_id", queryRequest::setAttachmentId);
+            extractStringField(responseNode, "datacenter", queryRequest::setDatacenter);
+            
+            if (hasNonNullValue(responseNode, "step_name")) {
                 String normalized = stepNameNormalizer.normalize(responseNode.get("step_name").asText());
                 queryRequest.setStepName(normalized);
             }
 
-            if (responseNode.has("attachment_id") && !responseNode.get("attachment_id").isNull()) {
-                queryRequest.setAttachmentId(responseNode.get("attachment_id").asText());
-            }
-
-            if (responseNode.has("datacenter") && !responseNode.get("datacenter").isNull()) {
-                queryRequest.setDatacenter(responseNode.get("datacenter").asText());
-            }
-
-            if (responseNode.has("report_date") && !responseNode.get("report_date").isNull()) {
+            if (hasNonNullValue(responseNode, "report_date")) {
                 try {
                     queryRequest.setReportDate(LocalDate.parse(responseNode.get("report_date").asText()));
                 } catch (DateTimeParseException e) {
-                    logger.warn("Invalid date format in LLM response: {}", responseNode.get("report_date").asText());
+                    log.warn("Invalid date format in LLM response: {}", responseNode.get("report_date").asText());
                 }
             }
 
-            if (responseNode.has("query") && !responseNode.get("query").isNull()) {
+            if (hasNonNullValue(responseNode, "query")) {
                 queryRequest.setQuery(responseNode.get("query").asText());
             } else {
                 queryRequest.setQuery(originalQuery);
             }
 
-            double confidence = 0.8; // Default confidence
-            if (responseNode.has("confidence") && !responseNode.get("confidence").isNull()) {
-                confidence = responseNode.get("confidence").asDouble();
-            }
-
-            String intent = null; // No default; rely on model to choose
-            if (responseNode.has("intent") && !responseNode.get("intent").isNull()) {
-                intent = responseNode.get("intent").asText();
-            }
-            // response_mode (metrics vs analysis) for 'query' intent
-            String responseMode = null;
-            if (responseNode.has("response_mode") && !responseNode.get("response_mode").isNull()) {
-                responseMode = responseNode.get("response_mode").asText();
-            }
-
-            boolean isRelevant = true;
-            String irrelevantReason = null;
-            if (responseNode.has("is_relevant") && !responseNode.get("is_relevant").isNull()) {
-                isRelevant = responseNode.get("is_relevant").asBoolean(true);
-            }
-            if (responseNode.has("irrelevant_reason") && !responseNode.get("irrelevant_reason").isNull()) {
-                irrelevantReason = responseNode.get("irrelevant_reason").asText();
-            }
+            double confidence = extractDoubleField(responseNode, "confidence", 0.8);
+            String intent = extractStringField(responseNode, "intent");
+            String responseMode = extractStringField(responseNode, "response_mode");
+            boolean isRelevant = extractBooleanField(responseNode, "is_relevant", true);
+            String irrelevantReason = extractStringField(responseNode, "irrelevant_reason");
 
             return new ParameterExtractionResult(queryRequest, confidence, "LLM_EXTRACTION", intent, responseMode, isRelevant, irrelevantReason);
 
         } catch (JsonProcessingException e) {
-            logger.error("Failed to parse LLM response as JSON: {}", llmResponse, e);
+            log.error("Failed to parse LLM response as JSON: {}", llmResponse, e);
             return new ParameterExtractionResult(new QueryRequest(), 0.0, "LLM_PARSE_ERROR");
         }
+    }
+
+    // Helper methods for JSON extraction
+    private boolean hasNonNullValue(JsonNode node, String fieldName) {
+        return node.has(fieldName) && !node.get(fieldName).isNull();
+    }
+
+    private void extractStringField(JsonNode node, String fieldName, java.util.function.Consumer<String> setter) {
+        if (hasNonNullValue(node, fieldName)) {
+            setter.accept(node.get(fieldName).asText());
+        }
+    }
+
+    private String extractStringField(JsonNode node, String fieldName) {
+        return hasNonNullValue(node, fieldName) ? node.get(fieldName).asText() : null;
+    }
+
+    private void extractIntField(JsonNode node, String fieldName, java.util.function.Consumer<Integer> setter) {
+        if (hasNonNullValue(node, fieldName)) {
+            setter.accept(node.get(fieldName).asInt());
+        }
+    }
+
+    private double extractDoubleField(JsonNode node, String fieldName, double defaultValue) {
+        return hasNonNullValue(node, fieldName) ? node.get(fieldName).asDouble() : defaultValue;
+    }
+
+    private boolean extractBooleanField(JsonNode node, String fieldName, boolean defaultValue) {
+        return hasNonNullValue(node, fieldName) ? node.get(fieldName).asBoolean(defaultValue) : defaultValue;
     }
 
     /**
      * Result class for parameter extraction
      */
+    @Getter
+    @AllArgsConstructor
     public static class ParameterExtractionResult {
         private final QueryRequest queryRequest;
         private final double confidence;
         private final String extractionMethod;
         private final String intent;
+        private final String responseMode; // "metrics" or "analysis" for query intent
         private final boolean relevant;
         private final String irrelevantReason;
-        private final String responseMode; // "metrics" or "analysis" for query intent
-
-        public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod, String intent) {
-            this(queryRequest, confidence, extractionMethod, intent, null, true, null);
-        }
-
-        public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod, String intent, String responseMode) {
-            this(queryRequest, confidence, extractionMethod, intent, responseMode, true, null);
-        }
 
         public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod) {
             this(queryRequest, confidence, extractionMethod, null, null, true, null);
         }
 
-        public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod, String intent, String responseMode, boolean relevant, String irrelevantReason) {
-            this.queryRequest = queryRequest;
-            this.confidence = confidence;
-            this.extractionMethod = extractionMethod;
-            this.intent = intent;
-            this.responseMode = responseMode;
-            this.relevant = relevant;
-            this.irrelevantReason = irrelevantReason;
+        public boolean isImportRequest() {
+            return "import".equalsIgnoreCase(intent);
         }
-
-        public QueryRequest getQueryRequest() { return queryRequest; }
-        public double getConfidence() { return confidence; }
-        public String getExtractionMethod() { return extractionMethod; }
-        public String getIntent() { return intent; }
-        public boolean isRelevant() { return relevant; }
-        public String getIrrelevantReason() { return irrelevantReason; }
-        public boolean isImportRequest() { return intent != null && "import".equalsIgnoreCase(intent); }
-        public String getResponseMode() { return responseMode; }
     }
 }

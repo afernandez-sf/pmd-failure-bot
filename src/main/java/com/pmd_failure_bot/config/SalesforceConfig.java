@@ -1,8 +1,10 @@
 package com.pmd_failure_bot.config;
 
+import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
+@Data
 @Configuration
 @ConfigurationProperties(prefix = "salesforce")
 public class SalesforceConfig {
@@ -11,76 +13,10 @@ public class SalesforceConfig {
     private String password;
     private String securityToken;
     private String loginUrl;
-    private String apiVersion = "v61.0";
-    private int maxAttachmentSize = 50 * 1024 * 1024; // 50MB default
-    private int maxRetries = 3;
-    private int retryDelaySeconds = 2;
-    
-    public SalesforceConfig() {}
-    
-    public String getUsername() {
-        return username;
-    }
-    
-    public void setUsername(String username) {
-        this.username = username;
-    }
-    
-    public String getPassword() {
-        return password;
-    }
-    
-    public void setPassword(String password) {
-        this.password = password;
-    }
-    
-    public String getSecurityToken() {
-        return securityToken;
-    }
-    
-    public void setSecurityToken(String securityToken) {
-        this.securityToken = securityToken;
-    }
-    
-    public String getLoginUrl() {
-        return loginUrl;
-    }
-    
-    public void setLoginUrl(String loginUrl) {
-        this.loginUrl = loginUrl;
-    }
-    
-    public String getApiVersion() {
-        return apiVersion;
-    }
-    
-    public void setApiVersion(String apiVersion) {
-        this.apiVersion = apiVersion;
-    }
-    
-    public int getMaxAttachmentSize() {
-        return maxAttachmentSize;
-    }
-    
-    public void setMaxAttachmentSize(int maxAttachmentSize) {
-        this.maxAttachmentSize = maxAttachmentSize;
-    }
-    
-    public int getMaxRetries() {
-        return maxRetries;
-    }
-    
-    public void setMaxRetries(int maxRetries) {
-        this.maxRetries = maxRetries;
-    }
-    
-    public int getRetryDelaySeconds() {
-        return retryDelaySeconds;
-    }
-    
-    public void setRetryDelaySeconds(int retryDelaySeconds) {
-        this.retryDelaySeconds = retryDelaySeconds;
-    }
+    private String apiVersion;
+    private int maxAttachmentSize;
+    private int maxRetries;
+    private int retryDelaySeconds;
     
     /**
      * Gets the combined password with security token as required by Salesforce

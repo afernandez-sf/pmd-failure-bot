@@ -14,7 +14,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 @Configuration
 @Import({
     SalesforceConfig.class,
-    SalesforceLlmGatewayConfig.class,
+    LlmGatewayConfig.class,
     SlackConfig.class
 })
 @ComponentScan(basePackages = {
@@ -22,7 +22,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
     "com.pmd_failure_bot.service",
     "com.pmd_failure_bot.integration",
     "com.pmd_failure_bot.data",
-    "com.pmd_failure_bot.common"
+    "com.pmd_failure_bot.util"
 })
 public class ApplicationConfig {
 

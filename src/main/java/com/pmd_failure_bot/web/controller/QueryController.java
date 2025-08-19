@@ -87,15 +87,15 @@ public class QueryController {
             DatabaseQueryService.DatabaseQueryResult result =
                 databaseQueryService.processNaturalLanguageQuery(request.getQuery(), intent);
 
-            if (result.isSuccessful()) {
+            if (result.successful()) {
                 List<QueryResponse.ReportInfo> reportPaths = List.of();
                 long executionTimeMs = System.currentTimeMillis() - startTime;
                 logger.info("✅ Function calling query successful: {} records found in {}ms", result.getResultCount(), executionTimeMs);
-                logger.info("📊 Generated SQL: {}", result.getSqlQuery());
+                logger.info("📊 Generated SQL: {}", result.sqlQuery());
                 QueryRequest qr = new QueryRequest();
                 qr.setQuery(request.getQuery());
                 NaturalLanguageQueryResponse response = responseFactory.createSuccessResponse(
-                    result.getNaturalLanguageResponse(),
+                    result.naturalLanguageResponse(),
                     qr,
                     conversationId,
                     1.0,
@@ -103,11 +103,11 @@ public class QueryController {
                 );
                 return ResponseEntity.ok(response);
             } else {
-                logger.error("❌ Function calling query failed: {}", result.getErrorMessage());
+                logger.error("❌ Function calling query failed: {}", result.errorMessage());
                 QueryRequest errorQueryRequest = new QueryRequest();
                 errorQueryRequest.setQuery(request.getQuery());
                 NaturalLanguageQueryResponse errorResponse = responseFactory.createErrorResponse(
-                    "I encountered an error while processing your query: " + result.getErrorMessage(),
+                    "I encountered an error while processing your query: " + result.errorMessage(),
                     errorQueryRequest,
                     conversationId,
                     System.currentTimeMillis() - startTime

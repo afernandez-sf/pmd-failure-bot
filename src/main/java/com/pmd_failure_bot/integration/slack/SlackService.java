@@ -29,9 +29,9 @@ public class SlackService {
     private final App slackApp;
     private final LogImportService logImportService;
     
-    // Simple cache to prevent duplicate processing of the same message
+    // Cache to prevent duplicate processing of the same message
     private final java.util.Set<String> processedMessages = java.util.concurrent.ConcurrentHashMap.newKeySet();
-    // Executor to process mentions concurrently (up to ~12 users)
+    // Executor to process mentions concurrently
     private final java.util.concurrent.ExecutorService mentionExecutor = java.util.concurrent.Executors.newFixedThreadPool(12);
 
     @Value("${slack.bot.channel:pmd-slack-bot}")
@@ -275,13 +275,13 @@ public class SlackService {
         
         // Add confidence indicator only when confidence is low AND result is weak (to avoid hedging before good answers)
         boolean lowConfidence = "LLM_EXTRACTION".equals(extractionResult.getExtractionMethod()) && extractionResult.getConfidence() < 0.5;
-        boolean weakResult = result == null || !result.isSuccessful() || result.getResultCount() == 0;
+        boolean weakResult = result == null || !result.successful() || result.getResultCount() == 0;
         if (lowConfidence && weakResult) {
             sb.append("🤔 *I'm not completely sure I understood your query correctly.*\n\n");
         }
         
         // Get the natural language response from the result
-        String analysisText = result.getNaturalLanguageResponse();
+        String analysisText = result.naturalLanguageResponse();
         sb.append(analysisText);
         
         // Related work items removed from Slack responses

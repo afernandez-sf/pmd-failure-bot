@@ -1,6 +1,6 @@
-package com.pmd_failure_bot.integration.salesforce;
+package com.pmd_failure_bot.integration.ai;
 
-import com.pmd_failure_bot.config.SalesforceLlmGatewayConfig;
+import com.pmd_failure_bot.config.LlmGatewayConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
@@ -18,32 +18,31 @@ import java.util.Map;
 import java.util.List;
 
 /**
- * Service for interacting with the Salesforce LLM Gateway
+ * Service for interacting with LLM Gateway
  */
 @Service
-public class SalesforceLlmGatewayService {
+public class LlmGatewayService implements AIService {
     
-    private static final Logger logger = LoggerFactory.getLogger(SalesforceLlmGatewayService.class);
+    private static final Logger logger = LoggerFactory.getLogger(LlmGatewayService.class);
     
-    private final SalesforceLlmGatewayConfig config;
+    private final LlmGatewayConfig config;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    
-
 
     @Autowired
-    public SalesforceLlmGatewayService(SalesforceLlmGatewayConfig config) {
+    public LlmGatewayService(LlmGatewayConfig config) {
         this.config = config;
     }
     
     /**
      * Generate a text response from the LLM
      */
-    public String generateResponse(String prompt) throws Exception {
+    @Override
+    public String generate(String prompt) throws Exception {
         config.validate();
         
-        logger.info("Sending request to Salesforce LLM Gateway...");
+        logger.info("Sending request to LLM Gateway...");
         
-        // Build the request payload to match Salesforce LLM Gateway format
+        // Build the request payload to match LLM Gateway format
         Map<String, Object> requestPayload = new HashMap<>();
         requestPayload.put("prompt", prompt);
         requestPayload.put("temperature", config.getTemperature());
@@ -55,30 +54,16 @@ public class SalesforceLlmGatewayService {
         
         // Create HTTP client with timeout
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
-            
-            // Create the POST request
             String endpoint = config.getGatewayUrl() + "/v1.0/generations";
             HttpPost request = new HttpPost(endpoint);
             
-            // Set headers
-            request.setHeader("Content-Type", "application/json");
-            request.setHeader("X-LLM-Provider", config.getLlmProvider());
-            request.setHeader("X-Org-Id", config.getOrgId());
-            request.setHeader("Authorization", config.getAuthScheme() + " " + config.getAuthToken());
-            request.setHeader("x-sfdc-core-tenant-id", config.getTenantId());
-            
-            if (config.getClientFeatureId() != null && !config.getClientFeatureId().isEmpty()) {
-                request.setHeader("x-client-feature-id", config.getClientFeatureId());
-            }
-            
-            // Set the request body
+            setCommonHeaders(request);
             request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
             
             logger.debug("Request headers: Content-Type: {}, X-LLM-Provider: {}, X-Org-Id: {}, Authorization: {}, x-sfdc-core-tenant-id: {}", 
                 "application/json", config.getLlmProvider(), config.getOrgId(), 
                 config.getAuthScheme() + " ***", config.getTenantId());
             
-            // Execute the request
             return httpClient.execute(request, response -> {
                 String responseBody = new String(response.getEntity().getContent().readAllBytes());
                 
@@ -86,64 +71,36 @@ public class SalesforceLlmGatewayService {
                     logger.info("Successfully received response from LLM Gateway");
                     logger.debug("Response body: {}", responseBody);
                     
-                    // Parse the response to extract the generated text
                     JsonNode responseJson = objectMapper.readTree(responseBody);
                     
-                    // Handle Salesforce LLM Gateway response format
-                    // Check for generations array (Gemini format)
-                    if (responseJson.has("generations") && responseJson.get("generations").isArray() && 
-                        responseJson.get("generations").size() > 0) {
+                    // Handle LLM Gateway generations format
+                    if (responseJson.has("generations") && responseJson.get("generations").isArray() &&
+                            !responseJson.get("generations").isEmpty()) {
                         JsonNode firstGeneration = responseJson.get("generations").get(0);
                         
-                        // Check for text field in generation
                         if (firstGeneration.has("text")) {
-                            return firstGeneration.get("text").asText();
-                        }
-                    }
-                    
-                    // Check for choices array (OpenAI format)
-                    if (responseJson.has("choices") && responseJson.get("choices").isArray() && 
-                        responseJson.get("choices").size() > 0) {
-                        JsonNode firstChoice = responseJson.get("choices").get(0);
-                        
-                        // Check for text field in choice
-                        if (firstChoice.has("text")) {
-                            return firstChoice.get("text").asText();
+                            String text = firstGeneration.get("text").asText();
+                            if (text != null && !text.trim().isEmpty()) {
+                                return text;
+                            }
+                            logger.warn("LLM Gateway returned empty text field");
                         }
                         
-                        // Check for message content
-                        if (firstChoice.has("message") && firstChoice.get("message").has("content")) {
-                            return firstChoice.get("message").get("content").asText();
+                        if (firstGeneration.has("content")) {
+                            String content = firstGeneration.get("content").asText();
+                            if (content != null && !content.trim().isEmpty()) {
+                                return content;
+                            }
+                            logger.warn("LLM Gateway returned empty content field");
                         }
                         
-                        // Check for completion field
-                        if (firstChoice.has("completion")) {
-                            return firstChoice.get("completion").asText();
-                        }
+                        logger.warn("LLM Gateway returned generation with no valid text or content");
                     }
                     
-                    // Check for direct fields in response
-                    if (responseJson.has("text")) {
-                        return responseJson.get("text").asText();
-                    }
-                    
-                    if (responseJson.has("content")) {
-                        return responseJson.get("content").asText();
-                    }
-                    
-                    if (responseJson.has("completion")) {
-                        return responseJson.get("completion").asText();
-                    }
-                    
-                    // Log the response structure for debugging
-                    logger.warn("Unable to parse LLM response format. Response structure: {}", responseJson.toPrettyString());
-                    return responseBody;
-                    
+                    logger.warn("Unable to parse LLM Gateway response format. Response structure: {}", responseJson.toPrettyString());
+                    throw new RuntimeException("LLM Gateway returned unrecognized response format");
                 } else {
-                    logger.error("LLM Gateway request failed with status: {} {}", response.getCode(), response.getReasonPhrase());
-                    logger.error("Request URL: {}", endpoint);
-                    logger.error("Request payload: {}", jsonPayload);
-                    logger.error("Response body: {}", responseBody);
+                    logRequestFailure("LLM Gateway", response.getCode(), response.getReasonPhrase(), endpoint, jsonPayload, responseBody);
                     throw new RuntimeException("LLM Gateway request failed: " + response.getCode() + " " + response.getReasonPhrase() + ". Response: " + responseBody);
                 }
             });
@@ -153,10 +110,11 @@ public class SalesforceLlmGatewayService {
     /**
      * Generate response with function calling support
      */
-    public FunctionCallResponse generateResponseWithFunctions(String userMessage, List<Map<String, Object>> tools) throws Exception {
+    @Override
+    public FunctionCallResponse generateWithFunctions(String userMessage, List<Map<String, Object>> tools) throws Exception {
         config.validate();
         
-        logger.info("Sending function calling request to Salesforce LLM Gateway...");
+        logger.info("Sending function calling request to LLM Gateway...");
         
         // Build the messages array for chat completion
         Map<String, Object> userMsg = new HashMap<>();
@@ -202,28 +160,15 @@ public class SalesforceLlmGatewayService {
         String jsonPayload = objectMapper.writeValueAsString(requestPayload);
         logger.debug("Function calling request payload: {}", jsonPayload);
         
-        // Create HTTP client with timeout
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
-            
+
             // Use chat/generations endpoint for function calling
             String endpoint = config.getGatewayUrl() + "/v1.0/chat/generations";
             HttpPost request = new HttpPost(endpoint);
             
-            // Set headers
-            request.setHeader("Content-Type", "application/json");
-            request.setHeader("X-LLM-Provider", config.getLlmProvider());
-            request.setHeader("X-Org-Id", config.getOrgId());
-            request.setHeader("Authorization", config.getAuthScheme() + " " + config.getAuthToken());
-            request.setHeader("x-sfdc-core-tenant-id", config.getTenantId());
-            
-            if (config.getClientFeatureId() != null && !config.getClientFeatureId().isEmpty()) {
-                request.setHeader("x-client-feature-id", config.getClientFeatureId());
-            }
-            
-            // Set the request body
+            setCommonHeaders(request);
             request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
             
-            // Execute the request
             return httpClient.execute(request, response -> {
                 String responseBody = new String(response.getEntity().getContent().readAllBytes());
                 
@@ -236,10 +181,7 @@ public class SalesforceLlmGatewayService {
                     return parseFunctionCallResponse(responseJson);
                     
                 } else {
-                    logger.error("Function calling request failed with status: {} {}", response.getCode(), response.getReasonPhrase());
-                    logger.error("Request URL: {}", endpoint);
-                    logger.error("Request payload: {}", jsonPayload);
-                    logger.error("Response body: {}", responseBody);
+                    logRequestFailure("Function calling", response.getCode(), response.getReasonPhrase(), endpoint, jsonPayload, responseBody);
                     throw new RuntimeException("Function calling request failed: " + response.getCode() + " " + response.getReasonPhrase() + ". Response: " + responseBody);
                 }
             });
@@ -249,10 +191,11 @@ public class SalesforceLlmGatewayService {
     /**
      * Generate a strictly structured JSON response using Structured Outputs (response_format)
      */
-    public String generateStructuredJson(String prompt, Map<String, Object> jsonSchema) throws Exception {
+    @Override
+    public String generateStructured(String prompt, Map<String, Object> jsonSchema) throws Exception {
         config.validate();
 
-        logger.info("Sending structured output request to Salesforce LLM Gateway...");
+        logger.info("Sending structured output request to LLM Gateway...");
 
         Map<String, Object> requestPayload = new HashMap<>();
         requestPayload.put("model", config.getModel());
@@ -270,9 +213,8 @@ public class SalesforceLlmGatewayService {
         Map<String, Object> parameters = new HashMap<>();
         Map<String, Object> responseFormat = new HashMap<>();
         responseFormat.put("type", "json_schema");
-        Map<String, Object> jsonSchemaWrapper = new HashMap<>();
-        // Expect caller to set name/strict/schema
-        jsonSchemaWrapper.putAll(jsonSchema);
+
+        Map<String, Object> jsonSchemaWrapper = new HashMap<>(jsonSchema);
         responseFormat.put("json_schema", jsonSchemaWrapper);
         parameters.put("response_format", responseFormat);
         requestPayload.put("parameters", parameters);
@@ -283,14 +225,7 @@ public class SalesforceLlmGatewayService {
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
             String endpoint = config.getGatewayUrl() + "/v1.0/chat/generations";
             HttpPost request = new HttpPost(endpoint);
-            request.setHeader("Content-Type", "application/json");
-            request.setHeader("X-LLM-Provider", config.getLlmProvider());
-            request.setHeader("X-Org-Id", config.getOrgId());
-            request.setHeader("Authorization", config.getAuthScheme() + " " + config.getAuthToken());
-            request.setHeader("x-sfdc-core-tenant-id", config.getTenantId());
-            if (config.getClientFeatureId() != null && !config.getClientFeatureId().isEmpty()) {
-                request.setHeader("x-client-feature-id", config.getClientFeatureId());
-            }
+            setCommonHeaders(request);
             request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
 
             return httpClient.execute(request, response -> {
@@ -300,7 +235,7 @@ public class SalesforceLlmGatewayService {
                     JsonNode generationDetails = responseJson.get("generation_details");
                     if (generationDetails != null && generationDetails.has("generations")) {
                         JsonNode gens = generationDetails.get("generations");
-                        if (gens.isArray() && gens.size() > 0) {
+                        if (gens.isArray() && !gens.isEmpty()) {
                             JsonNode first = gens.get(0);
                             if (first.has("content")) {
                                 return first.get("content").asText();
@@ -310,12 +245,11 @@ public class SalesforceLlmGatewayService {
                             }
                         }
                     }
-                    // Fallback to raw body when unknown
+                    // Fallback to raw body
                     logger.warn("Unable to parse structured output response; returning raw body");
                     return responseBody;
                 } else {
-                    logger.error("Structured output request failed: {} {}", response.getCode(), response.getReasonPhrase());
-                    logger.error("Response body: {}", responseBody);
+                    logRequestFailure("Structured output", response.getCode(), response.getReasonPhrase(), endpoint, jsonPayload, responseBody);
                     throw new RuntimeException("Structured output request failed: " + response.getCode() + " " + response.getReasonPhrase());
                 }
             });
@@ -328,13 +262,13 @@ public class SalesforceLlmGatewayService {
             JsonNode generationDetails = responseJson.get("generation_details");
             if (generationDetails != null && generationDetails.has("generations")) {
                 JsonNode generations = generationDetails.get("generations");
-                if (generations.isArray() && generations.size() > 0) {
+                if (generations.isArray() && !generations.isEmpty()) {
                     JsonNode generation = generations.get(0);
                     
                     // Check if there are tool invocations
                     if (generation.has("tool_invocations") && generation.get("tool_invocations").isArray()) {
                         JsonNode toolInvocations = generation.get("tool_invocations");
-                        if (toolInvocations.size() > 0) {
+                        if (!toolInvocations.isEmpty()) {
                             JsonNode toolInvocation = toolInvocations.get(0);
                             if (toolInvocation.has("function")) {
                                 JsonNode function = toolInvocation.get("function");
@@ -342,59 +276,43 @@ public class SalesforceLlmGatewayService {
                                 String arguments = function.get("arguments").asText();
                                 String invocationId = toolInvocation.get("id").asText();
                                 
-                                return new FunctionCallResponse(functionName, arguments, invocationId);
+                                return FunctionCallResponse.forCall(functionName, arguments, invocationId);
                             }
                         }
                     }
                     
                     // No function call, return regular content
                     if (generation.has("content")) {
-                        return new FunctionCallResponse(generation.get("content").asText());
+                        return FunctionCallResponse.forContent(generation.get("content").asText());
                     }
                 }
             }
             
             logger.warn("Unable to parse function call response format. Response structure: {}", responseJson.toPrettyString());
-            return new FunctionCallResponse("Unable to parse response");
+            return FunctionCallResponse.forContent("Unable to parse response");
             
         } catch (Exception e) {
             logger.error("Error parsing function call response: ", e);
-            return new FunctionCallResponse("Error parsing response: " + e.getMessage());
+            return FunctionCallResponse.forContent("Error parsing response: " + e.getMessage());
         }
     }
     
-    /**
-     * Response class for function calling
-     */
-    public static class FunctionCallResponse {
-        private final boolean isFunctionCall;
-        private final String functionName;
-        private final String arguments;
-        private final String invocationId;
-        private final String content;
+    private void setCommonHeaders(HttpPost request) {
+        request.setHeader("Content-Type", "application/json");
+        request.setHeader("X-LLM-Provider", config.getLlmProvider());
+        request.setHeader("X-Org-Id", config.getOrgId());
+        request.setHeader("Authorization", config.getAuthScheme() + " " + config.getAuthToken());
+        request.setHeader("x-sfdc-core-tenant-id", config.getTenantId());
         
-        // Constructor for function call
-        public FunctionCallResponse(String functionName, String arguments, String invocationId) {
-            this.isFunctionCall = true;
-            this.functionName = functionName;
-            this.arguments = arguments;
-            this.invocationId = invocationId;
-            this.content = null;
+        if (config.getClientFeatureId() != null && !config.getClientFeatureId().isEmpty()) {
+            request.setHeader("x-client-feature-id", config.getClientFeatureId());
         }
-        
-        // Constructor for regular content
-        public FunctionCallResponse(String content) {
-            this.isFunctionCall = false;
-            this.functionName = null;
-            this.arguments = null;
-            this.invocationId = null;
-            this.content = content;
-        }
-        
-        public boolean isFunctionCall() { return isFunctionCall; }
-        public String getFunctionName() { return functionName; }
-        public String getArguments() { return arguments; }
-        public String getInvocationId() { return invocationId; }
-        public String getContent() { return content; }
+    }
+    
+    private void logRequestFailure(String operation, int statusCode, String reasonPhrase, String endpoint, String payload, String responseBody) {
+        logger.error("{} request failed with status: {} {}", operation, statusCode, reasonPhrase);
+        logger.error("Request URL: {}", endpoint);
+        logger.error("Request payload: {}", payload);
+        logger.error("Response body: {}", responseBody);
     }
 }
