@@ -25,7 +25,6 @@ public class PromptTemplates {
               .append("- report_date (YYYY-MM-DD)\n")
               .append("- query (string; the core question with parameters removed)\n")
               .append("- intent (string; one of: import, metrics, analysis)\n")
-              .append("- response_mode (string; one of: metrics, analysis; optional)\n")
               .append("- confidence (number 0.0–1.0)\n")
               .append("- is_relevant (boolean; true if about PMD/logs/deployments)\n")
               .append("- irrelevant_reason (string; short reason when is_relevant=false)\n\n")
@@ -40,7 +39,7 @@ public class PromptTemplates {
               .append("8) If not about PMD/logs/deployments, set is_relevant=false and give a brief irrelevant_reason.\n")
               .append("9) Return ONLY JSON, no extra text.\n\n")
               .append("Example query: \"What went wrong with case 123456's SSH deployment yesterday?\"\n")
-              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"datacenter\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"analysis\", \"response_mode\": \"analysis\", \"confidence\": 0.9, \"is_relevant\": true, \"irrelevant_reason\": null}\n\n")
+              .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 123456, \"step_name\": \"SSH_TO_ALL_HOSTS\", \"attachment_id\": null, \"datacenter\": null, \"report_date\": \"2024-01-15\", \"query\": \"What went wrong with deployment\", \"intent\": \"analysis\", \"confidence\": 0.9, \"is_relevant\": true, \"irrelevant_reason\": null}\n\n")
               .append("Example import: \"Import logs for case 567890\"\n")
               .append("Example output: {\"record_id\": null, \"work_id\": null, \"case_number\": 567890, \"step_name\": null, \"attachment_id\": null, \"datacenter\": null, \"report_date\": null, \"query\": \"Import logs\", \"intent\": \"import\", \"confidence\": 0.95, \"is_relevant\": true, \"irrelevant_reason\": null}\n")
               .append("</instructions>\n\n");

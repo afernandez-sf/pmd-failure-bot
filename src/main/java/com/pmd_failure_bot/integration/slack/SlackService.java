@@ -20,7 +20,6 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class SlackService {
 
-
     private final NaturalLanguageProcessingService nlpService;
     private final DatabaseQueryService databaseQueryService;
     private final App slackApp;
@@ -98,7 +97,7 @@ public class SlackService {
         try {
             if (cleanedText == null || cleanedText.isBlank()) return;
             log.info("Received mention from user {} in channel {}: {}", userId, channel, cleanedText);
-            processQueryAndRespond(cleanedText, channel, null, userId, threadTs);
+            processQueryAndRespond(cleanedText, channel, userId, threadTs);
         } catch (Exception e) {
             log.error("Error handling app mention: ", e);
             try {
@@ -112,7 +111,7 @@ public class SlackService {
     /**
      * Process a query and send a response to Slack
      */
-    private void processQueryAndRespond(String queryText, String channel, Object ctx, String userId, String threadTs) {
+    private void processQueryAndRespond(String queryText, String channel, String userId, String threadTs) {
         try {
             // Add reaction to show we're processing
             slackReactionService.addReaction(channel, threadTs, SlackConstants.PROCESSING_REACTION);

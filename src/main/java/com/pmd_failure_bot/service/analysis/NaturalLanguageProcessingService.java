@@ -77,7 +77,6 @@ public class NaturalLanguageProcessingService {
         properties.put("report_date", Map.of("type", "string"));
         properties.put("query", Map.of("type", "string"));
         properties.put("intent", Map.of("type", "string", "enum", List.of("import","metrics","analysis")));
-        properties.put("response_mode", Map.of("type", "string", "enum", List.of("metrics","analysis")));
         properties.put("confidence", Map.of("type", "number", "minimum", 0, "maximum", 1));
         properties.put("is_relevant", Map.of("type", "boolean"));
         properties.put("irrelevant_reason", Map.of("type", "string"));
@@ -127,11 +126,10 @@ public class NaturalLanguageProcessingService {
 
             double confidence = extractDoubleField(responseNode, "confidence", 0.8);
             String intent = extractStringField(responseNode, "intent");
-            String responseMode = extractStringField(responseNode, "response_mode");
             boolean isRelevant = extractBooleanField(responseNode, "is_relevant", true);
             String irrelevantReason = extractStringField(responseNode, "irrelevant_reason");
 
-            return new ParameterExtractionResult(queryRequest, confidence, "LLM_EXTRACTION", intent, responseMode, isRelevant, irrelevantReason);
+            return new ParameterExtractionResult(queryRequest, confidence, "LLM_EXTRACTION", intent, isRelevant, irrelevantReason);
 
         } catch (JsonProcessingException e) {
             log.error("Failed to parse LLM response as JSON: {}", llmResponse, e);
@@ -178,12 +176,11 @@ public class NaturalLanguageProcessingService {
         private final double confidence;
         private final String extractionMethod;
         private final String intent;
-        private final String responseMode; // "metrics" or "analysis" for query intent
         private final boolean relevant;
         private final String irrelevantReason;
 
         public ParameterExtractionResult(QueryRequest queryRequest, double confidence, String extractionMethod) {
-            this(queryRequest, confidence, extractionMethod, null, null, true, null);
+            this(queryRequest, confidence, extractionMethod, null, true, null);
         }
 
         public boolean isImportRequest() {
